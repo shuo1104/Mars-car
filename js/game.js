@@ -1,12 +1,16 @@
 /**
  * Game Manager & Loop Handler for Mars Rover Explorer
+ * Enhanced with Post-Processing Bloom Pipeline, ACES Tone Mapping, 3D Target HUD Markers & Dynamic FOV/Camera Shake
  */
 class MarsGame {
     constructor() {
         this.container = document.getElementById('game-container');
+        this.targetMarkersContainer = document.getElementById('target-markers-container');
         this.scene = null;
         this.camera = null;
         this.renderer = null;
+        this.composer = null;
+        this.bloomPass = null;
         this.world = null;
         this.rover = null;
         this.clock = new THREE.Clock();
@@ -19,6 +23,7 @@ class MarsGame {
         this.discoveredSamples = new Set();
         this.sandstormTimer = 0;
         this.isSandstorm = false;
+        this.targetMarkersMap = new Map();
 
         // Input state
         this.inputs = {
@@ -63,6 +68,7 @@ class MarsGame {
 
         this.setupInputs();
         this.setupUIHandlers();
+        this.init3DTargetHUD();
 
         // Start render loop
         this.animate();
@@ -87,9 +93,110 @@ class MarsGame {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+        // Cinematic ACES Filmic Tone Mapping & Color Grading
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.25;
+
         this.container.appendChild(this.renderer.domElement);
 
+        // Setup EffectComposer Bloom Pipeline if Three.js postprocessing modules are loaded
+        if (typeof THREE.EffectComposer !== 'undefined' && typeof THREE.UnrealBloomPass !== 'undefined') {
+            try {
+                this.composer = new THREE.EffectComposer(this.renderer);
+                const renderPass = new THREE.RenderPass(this.scene, this.camera);
+                this.composer.addPass(renderPass);
+
+                this.bloomPass = new THREE.UnrealBloomPass(
+                    new THREE.Vector2(window.innerWidth, window.innerHeight),
+                    0.65, // bloom strength
+                    0.4,  // radius
+                    0.85  // threshold
+                );
+                this.composer.addPass(this.bloomPass);
+            } catch (err) {
+                console.warn("Post-processing setup warning:", err);
+                this.composer = null;
+            }
+        }
+
         window.addEventListener('resize', () => this.onWindowResize());
+    }
+
+    init3DTargetHUD() {
+        if (!this.targetMarkersContainer) return;
+        this.targetMarkersContainer.innerHTML = '';
+        this.targetMarkersMap.clear();
+
+        // Markers are created dynamically once world samples are ready
+        setTimeout(() => {
+            if (!this.world || !this.world.samples) return;
+            this.world.samples.forEach(sample => {
+                const el = document.createElement('div');
+                el.className = 'world-target-marker hidden';
+                el.id = `target-marker-${sample.id}`;
+                el.innerHTML = `
+                    <div class="marker-reticle">
+                        <div class="marker-dot"></div>
+                    </div>
+                    <div class="marker-info">
+                        <span class="marker-tag">TARGET</span>
+                        <span class="marker-title">${sample.name}</span>
+                        <span class="marker-dist">--m</span>
+                    </div>
+                `;
+                this.targetMarkersContainer.appendChild(el);
+                this.targetMarkersMap.set(sample.id, el);
+            });
+        }, 100);
+    }
+
+    update3DTargetHUD() {
+        if (!this.world || !this.world.samples) return;
+
+        const camera = this.camera;
+        const widthHalf = window.innerWidth / 2;
+        const heightHalf = window.innerHeight / 2;
+        const tempVec = new THREE.Vector3();
+        const activeTarget = this.rover.scanTarget;
+
+        this.world.samples.forEach(s => {
+            const markerEl = this.targetMarkersMap.get(s.id);
+            if (!markerEl) return;
+
+            if (s.collected) {
+                markerEl.classList.add('hidden');
+                return;
+            }
+
+            tempVec.set(s.pos.x, s.y + 1.8, s.pos.z);
+            const dist = this.rover.position.distanceTo(tempVec);
+
+            // Project 3D vector to 2D Screen Space
+            tempVec.project(camera);
+
+            const isBehind = tempVec.z > 1.0;
+            const isOutOfRange = dist > 60;
+
+            if (isBehind || isOutOfRange) {
+                markerEl.classList.add('hidden');
+            } else {
+                const screenX = (tempVec.x * widthHalf) + widthHalf;
+                const screenY = -(tempVec.y * heightHalf) + heightHalf;
+
+                markerEl.style.left = `${screenX}px`;
+                markerEl.style.top = `${screenY}px`;
+                markerEl.classList.remove('hidden');
+
+                const distEl = markerEl.querySelector('.marker-dist');
+                if (distEl) distEl.textContent = `${dist.toFixed(1)}m`;
+
+                if (activeTarget && activeTarget.id === s.id) {
+                    markerEl.classList.add('active-target');
+                } else {
+                    markerEl.classList.remove('active-target');
+                }
+            }
+        });
     }
 
     setupInputs() {
@@ -202,101 +309,88 @@ class MarsGame {
         window.roverAudio.playUIClick();
         const charging = !this.rover.isChargingMode;
         this.rover.setChargingMode(charging);
-        this.dom.driveMode.textContent = charging ? "充能 CHARGING" : "标准 EXPLORE";
-        this.dom.driveMode.style.color = charging ? "#ffd166" : "#00e5ff";
+        this.dom.driveMode.textContent = charging ? "太阳能充能 CHARGE" : "标准 EXPLORE";
+        this.dom.driveMode.className = `val ${charging ? 'charge' : 'highlight'}`;
+        if (charging) {
+            this.showTemporaryAlert("☀️ 提示：展开太阳能电池板", "原地停靠并收集光照能量充能中...", 3000);
+        }
     }
 
     triggerSampleScan() {
         if (!this.rover.scanTarget || this.rover.isScanning) return;
 
-        if (this.battery < 8.0) {
-            alert("⚠️ 电池电量不足！发射脉冲激光至少需要 8% 电量，请按 [R] 原地太阳能充电。");
-            return;
-        }
-
-        this.battery -= 8.0;
+        window.roverAudio.playScanSound();
         this.rover.isScanning = true;
-        window.roverAudio.playLaserScan();
+        this.rover.scanProgress = 0;
 
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += 20;
-            this.dom.scanProgressBar.style.width = `${progress}%`;
-            
-            // Trigger laser sparks particle effect at target rock position
+        const scanInterval = setInterval(() => {
+            this.rover.scanProgress += 12;
+            this.dom.scanProgressBar.style.width = `${this.rover.scanProgress}%`;
+
             if (this.rover.scanTarget) {
                 this.world.triggerScanSparks(this.rover.scanTarget.mesh.position);
             }
 
-            if (progress >= 100) {
-                clearInterval(interval);
+            if (this.rover.scanProgress >= 100) {
+                clearInterval(scanInterval);
+                this.completeSampleCollection(this.rover.scanTarget);
                 this.rover.isScanning = false;
                 this.world.hideScanSparks();
-                this.collectSample(this.rover.scanTarget);
             }
         }, 120);
     }
 
-    collectSample(sample) {
-        if (sample.collected) return;
-
+    completeSampleCollection(sample) {
+        if (!sample || sample.collected) return;
         sample.collected = true;
         sample.mesh.visible = false;
         sample.beacon.visible = false;
+        if (sample.hologramRing) sample.hologramRing.visible = false;
 
-        this.discoveredSamples.add(sample.id);
         this.collectedCount++;
+        this.discoveredSamples.add(sample.id);
 
-        window.roverAudio.playSampleCollected();
-
-        // Update HUD & Modal Count
         this.dom.sampleCountBadge.textContent = `${this.collectedCount} / ${this.world.samples.length}`;
         this.dom.modalSampleCount.textContent = this.collectedCount;
 
-        this.renderDiscoveryLogGrid();
+        // Render card into scientific discoveries modal
+        const card = document.createElement('div');
+        card.className = 'sample-card discovered';
+        card.innerHTML = `
+            <div class="type">${sample.type}</div>
+            <div class="name">${sample.name}</div>
+            <div class="desc">${sample.desc}</div>
+        `;
+        this.dom.samplesGrid.appendChild(card);
 
-        // Alert popup banner
-        this.showTemporaryAlert("🔬 科学样本成功采集！", `已将【${sample.name}】数据同步至高空卫星与发现日志。`);
+        this.showTemporaryAlert("🎉 样本收集成功！", `分析完成: ${sample.name}`, 4000);
+        this.dom.scanPanel.classList.add('hidden');
     }
 
-    showTemporaryAlert(title, msg, duration = 4000) {
-        this.dom.alertBanner.classList.remove('hidden');
+    showTemporaryAlert(title, msg, duration = 3500) {
         document.getElementById('alert-title').textContent = title;
         document.getElementById('alert-msg').textContent = msg;
+        this.dom.alertBanner.classList.remove('hidden');
 
-        setTimeout(() => {
+        if (this.alertTimeout) clearTimeout(this.alertTimeout);
+        this.alertTimeout = setTimeout(() => {
             this.dom.alertBanner.classList.add('hidden');
         }, duration);
     }
 
-    renderDiscoveryLogGrid() {
-        this.dom.samplesGrid.innerHTML = '';
-        this.world.samples.forEach(s => {
-            const card = document.createElement('div');
-            card.className = `sample-card ${s.collected ? 'discovered' : ''}`;
-            card.innerHTML = `
-                <div class="type">${s.collected ? s.type : '未检测样品'}</div>
-                <div class="name">${s.collected ? s.name : '未知地理标记 ???'}</div>
-                <div class="desc">${s.collected ? s.desc : '靠近雷达黄色标记点并按 [E] 键使用光谱激光扫描解锁。'}</div>
-            `;
-            this.dom.samplesGrid.appendChild(card);
-        });
-    }
-
     updateBatteryAndPower(deltaTime) {
         if (this.rover.isChargingMode) {
-            const efficiency = this.isSandstorm ? 2.5 : 6.0;
-            this.solarPower = efficiency;
-            this.battery = Math.min(100.0, this.battery + efficiency * deltaTime);
+            const stormPenalty = this.isSandstorm ? 0.35 : 1.0;
+            this.solarPower = 4.8 * stormPenalty;
+            this.battery = Math.min(100.0, this.battery + this.solarPower * deltaTime * 1.5);
         } else {
-            this.solarPower = 0.2;
-            const driveDrain = 0.2 + (Math.abs(this.rover.speed) / this.rover.maxSpeed) * 0.8;
-            this.battery = Math.max(0.0, this.battery - driveDrain * deltaTime);
+            this.solarPower = 0.0;
+            const drainRate = (Math.abs(this.rover.speed) > 0.5 ? 0.4 : 0.08) + (this.rover.headlightsOn ? 0.15 : 0);
+            this.battery = Math.max(0.0, this.battery - drainRate * deltaTime);
         }
 
         this.dom.batteryText.textContent = `${Math.round(this.battery)}%`;
         this.dom.batteryBar.style.width = `${this.battery}%`;
-
         this.dom.solarText.textContent = `${this.solarPower.toFixed(1)} kW/h`;
         this.dom.solarBar.style.width = `${(this.solarPower / 6.0) * 100}%`;
     }
@@ -350,20 +444,35 @@ class MarsGame {
         const rPos = this.rover.position;
         const rRot = this.rover.rotation;
 
-        if (this.cameraMode === 0) {
+        // Dynamic FOV kick based on speed
+        const speedRatio = Math.abs(this.rover.speed) / this.rover.maxSpeed;
+        const targetFov = 60 + speedRatio * 8;
+        this.camera.fov += (targetFov - this.camera.fov) * 0.08;
+
+        // Subtle Camera shake during high speed offroad or sandstorm
+        let shakeX = 0, shakeY = 0;
+        if (speedRatio > 0.6 || this.isSandstorm) {
+            const intensity = (speedRatio > 0.6 ? 0.08 : 0) + (this.isSandstorm ? 0.12 : 0);
+            shakeX = (Math.random() - 0.5) * intensity;
+            shakeY = (Math.random() - 0.5) * intensity;
+        }
+
+        this.camera.updateProjectionMatrix();
+
+        if (this.cameraMode === 0) { // Chase view
             const offset = new THREE.Vector3(
-                Math.sin(rRot) * 8.5,
-                3.8,
-                Math.cos(rRot) * 8.5
+                Math.sin(rRot) * (8.5 + speedRatio * 1.2) + shakeX,
+                3.8 + shakeY,
+                Math.cos(rRot) * (8.5 + speedRatio * 1.2) + shakeX
             );
             const targetCamPos = rPos.clone().add(offset);
-            this.camera.position.lerp(targetCamPos, 0.1);
+            this.camera.position.lerp(targetCamPos, 0.12);
             this.camera.lookAt(rPos.clone().add(new THREE.Vector3(0, 1.2, 0)));
-        } else if (this.cameraMode === 1) {
+        } else if (this.cameraMode === 1) { // First Person POV
             const povPos = rPos.clone().add(new THREE.Vector3(
-                -Math.sin(rRot) * 0.7,
-                2.3,
-                -Math.cos(rRot) * 0.7
+                -Math.sin(rRot) * 0.7 + shakeX * 0.5,
+                2.3 + shakeY * 0.5,
+                -Math.cos(rRot) * 0.7 + shakeX * 0.5
             ));
             this.camera.position.copy(povPos);
             const lookTarget = povPos.clone().add(new THREE.Vector3(
@@ -372,8 +481,8 @@ class MarsGame {
                 -Math.cos(rRot) * 10
             ));
             this.camera.lookAt(lookTarget);
-        } else if (this.cameraMode === 2) {
-            this.camera.position.set(rPos.x, rPos.y + 45, rPos.z + 20);
+        } else if (this.cameraMode === 2) { // Satellite Overhead
+            this.camera.position.set(rPos.x + shakeX, rPos.y + 48, rPos.z + 20 + shakeY);
             this.camera.lookAt(rPos);
         }
     }
@@ -436,6 +545,9 @@ class MarsGame {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+        if (this.composer) {
+            this.composer.setSize(window.innerWidth, window.innerHeight);
+        }
     }
 
     animate() {
@@ -454,6 +566,7 @@ class MarsGame {
         this.updateBatteryAndPower(deltaTime);
         this.updateSandstormSystem(deltaTime);
         this.checkScanTarget();
+        this.update3DTargetHUD();
 
         window.roverAudio.updateEngineSound(this.rover.speed, this.inputs.forward || this.inputs.backward);
 
@@ -461,7 +574,11 @@ class MarsGame {
         this.renderRadar();
         this.updateTelemetryUI();
 
-        this.renderer.render(this.scene, this.camera);
+        if (this.composer) {
+            this.composer.render();
+        } else {
+            this.renderer.render(this.scene, this.camera);
+        }
     }
 }
 

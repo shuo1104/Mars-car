@@ -769,3 +769,146 @@ kbd {
     from { opacity: 0; }
     to { opacity: 1; }
 }
+
+/* 3D World-to-Screen Floating HUD Markers */
+#target-markers-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+}
+
+.world-target-marker {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.05s linear;
+}
+
+.world-target-marker.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.marker-reticle {
+    width: 36px;
+    height: 36px;
+    border: 1.5px dashed rgba(0, 229, 255, 0.6);
+    border-radius: 50%;
+    position: relative;
+    animation: reticleSpin 8s linear infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+.world-target-marker.active-target .marker-reticle {
+    border-color: var(--neon-gold);
+    border-style: solid;
+    width: 44px;
+    height: 44px;
+    box-shadow: 0 0 18px rgba(255, 209, 102, 0.7);
+    animation: reticlePulse 1.2s ease-in-out infinite alternate;
+}
+
+.marker-dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--neon-cyan);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--neon-cyan);
+}
+
+.world-target-marker.active-target .marker-dot {
+    background-color: var(--neon-gold);
+    box-shadow: 0 0 12px var(--neon-gold);
+}
+
+.marker-info {
+    margin-top: 6px;
+    background: rgba(12, 10, 15, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 229, 255, 0.4);
+    border-radius: 4px;
+    padding: 3px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-heading);
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+.world-target-marker.active-target .marker-info {
+    border-color: var(--neon-gold);
+    background: rgba(20, 15, 10, 0.9);
+}
+
+.marker-tag {
+    font-size: 9px;
+    color: var(--neon-orange);
+    font-weight: 800;
+}
+
+.marker-title {
+    font-size: 11px;
+    color: #fff;
+    font-weight: 700;
+}
+
+.marker-dist {
+    font-size: 10px;
+    color: var(--neon-cyan);
+}
+
+.world-target-marker.active-target .marker-dist {
+    color: var(--neon-gold);
+}
+
+@keyframes reticleSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes reticlePulse {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    100% { transform: scale(1.1); opacity: 1; }
+}
+
+/* Enhanced HUD Glow & Sci-Fi scanline grid */
+.hud-panel {
+    background: radial-gradient(circle at top left, rgba(20, 24, 38, 0.85), rgba(10, 12, 18, 0.88));
+}
+
+.hud-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+    opacity: 0.6;
+}
+
+/* Sci-fi Scanline background pattern overlay */
+#hud::after {
+    content: ' ';
+    display: block;
+    position: absolute;
+    top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.18) 50%);
+    background-size: 100% 4px;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.5;
+}
+
