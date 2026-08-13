@@ -1,6 +1,6 @@
 /**
  * Mars World Generator: Pure Infinite Procedural Terrain, Dynamic Sky, Volumetric Weather & Particle Systems
- * Implements Astronomically Accurate Mars Solar Motion, Blue Sunsets/Sunrises (Mie Scattering), and Infinite Terrain
+ * Features High-Granularity Mars Soil Normal Maps, Dual-Layer Wheel Sand Spray & Granular Volumetric Dust Plumes
  */
 class MarsWorld {
     constructor(scene) {
@@ -17,6 +17,9 @@ class MarsWorld {
         // Visual enhancement systems
         this.wheelDustSystem = null;
         this.wheelDustPositions = [];
+        this.sandSparksSystem = null;
+        this.sandSparksPositions = [];
+
         this.atmosphereDome = null;
         this.dayTime = 0.25; // 0 to 1 sol cycle (0.25 = sunrise/morning, 0.5 = solar noon, 0.75 = sunset)
         this.sunLight = null;
@@ -32,8 +35,10 @@ class MarsWorld {
         this.rockPool = [];
         this.maxRocks = 180;
 
-        // Particle textures & procedural normal maps
+        // High-Granularity Particle textures & procedural normal maps
         this.softParticleTexture = this.createSoftParticleTexture();
+        this.granularDustTexture = this.createGranularDustTexture();
+        this.sandGrainTexture = this.createSandGrainTexture();
         this.sunGlowTexture = this.createSunGlowTexture();
         this.blueAuraTexture = this.createBlueAuraTexture();
         this.proceduralTextures = this.createProceduralTerrainTextures();
@@ -46,9 +51,10 @@ class MarsWorld {
         this.initRockPool();
         this.initDustParticles();
         this.initWheelDustSystem();
+        this.initSandSparksSystem();
     }
 
-    // Canvas 2D soft particle texture for volumetric smoke/dust
+    // Canvas 2D soft particle texture for volumetric ambient dust
     createSoftParticleTexture() {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
@@ -63,6 +69,61 @@ class MarsWorld {
 
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, 64, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        return tex;
+    }
+
+    // Canvas 2D texture for Granular Dust Cloud Plumes with fine sand noise
+    createGranularDustTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255, 220, 180, 0.95)');
+        grad.addColorStop(0.3, 'rgba(230, 140, 70, 0.65)');
+        grad.addColorStop(0.7, 'rgba(180, 80, 30, 0.15)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+
+        // Add fine granular noise specks onto the particle texture
+        const imgData = ctx.getImageData(0, 0, 128, 128);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] > 20) {
+                const noise = (Math.random() - 0.5) * 35;
+                data[i] = Math.min(255, Math.max(0, data[i] + noise));
+                data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise));
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        return tex;
+    }
+
+    // Canvas 2D crisp sand grain texture for kickback gravel spray
+    createSandGrainTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = 'rgba(255, 200, 150, 0.95)';
+        ctx.beginPath();
+        ctx.arc(16, 16, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255, 255, 240, 1.0)';
+        ctx.beginPath();
+        ctx.arc(14, 14, 4, 0, Math.PI * 2);
+        ctx.fill();
 
         const tex = new THREE.CanvasTexture(canvas);
         tex.needsUpdate = true;
@@ -111,9 +172,9 @@ class MarsWorld {
         return tex;
     }
 
-    // Canvas 2D procedural Normal Map and Roughness Map for Mars Soil
+    // High-Resolution (1024x1024) Procedural Normal & Roughness Maps for Fine Mars Micro-Gravel
     createProceduralTerrainTextures() {
-        const size = 512;
+        const size = 1024;
         const canvasN = document.createElement('canvas');
         canvasN.width = size;
         canvasN.height = size;
@@ -132,18 +193,27 @@ class MarsWorld {
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
                 const index = (y * size + x) * 4;
-                const nx = Math.sin(x * 0.15) * Math.cos(y * 0.08) * 40;
-                const ny = Math.cos(x * 0.08) * Math.sin(y * 0.15) * 40;
+
+                // Dune ripples
+                let nx = Math.sin(x * 0.08) * Math.cos(y * 0.04) * 35;
+                let ny = Math.cos(x * 0.04) * Math.sin(y * 0.08) * 35;
+
+                // High-frequency micro-gravel speckle noise for crisp ground granularity
+                const fineNoiseX = (Math.sin(x * 0.45 + y * 0.2) + (Math.random() - 0.5) * 0.6) * 45;
+                const fineNoiseY = (Math.cos(y * 0.45 + x * 0.2) + (Math.random() - 0.5) * 0.6) * 45;
+
+                nx += fineNoiseX;
+                ny += fineNoiseY;
                 
                 dataN[index]     = Math.min(255, Math.max(0, 128 + nx));
                 dataN[index + 1] = Math.min(255, Math.max(0, 128 + ny));
                 dataN[index + 2] = 255;
                 dataN[index + 3] = 255;
 
-                const rough = 170 + Math.sin(x * 0.06 + y * 0.06) * 55;
-                dataR[index]     = rough;
-                dataR[index + 1] = rough;
-                dataR[index + 2] = rough;
+                const rough = 165 + Math.sin(x * 0.04 + y * 0.04) * 40 + (Math.random() - 0.5) * 30;
+                dataR[index]     = Math.min(255, Math.max(0, rough));
+                dataR[index + 1] = dataR[index];
+                dataR[index + 2] = dataR[index];
                 dataR[index + 3] = 255;
             }
         }
@@ -154,26 +224,28 @@ class MarsWorld {
         const normalTex = new THREE.CanvasTexture(canvasN);
         normalTex.wrapS = THREE.RepeatWrapping;
         normalTex.wrapT = THREE.RepeatWrapping;
-        normalTex.repeat.set(18, 18);
+        normalTex.repeat.set(24, 24);
 
         const roughTex = new THREE.CanvasTexture(canvasR);
         roughTex.wrapS = THREE.RepeatWrapping;
         roughTex.wrapT = THREE.RepeatWrapping;
-        roughTex.repeat.set(18, 18);
+        roughTex.repeat.set(24, 24);
 
         return { normalMap: normalTex, roughnessMap: roughTex };
     }
 
     /**
      * Deterministic Infinite Mathematical Height Function getTerrainHeight(x, z)
-     * Valid for any (x, z) from -infinity to +infinity!
+     * Includes fine micro-gravel height variations for tactile ground granularity
      */
     getTerrainHeight(x, z) {
         let h = Math.sin(x * 0.015) * Math.cos(z * 0.015) * 5.5;
         h += Math.sin(x * 0.038 + 1.4) * Math.sin(z * 0.038) * 2.2;
         h += Math.cos(x * 0.085) * Math.sin(z * 0.085) * 0.7;
 
-        h += Math.sin(x * 0.2) * Math.cos(z * 0.2) * 0.12;
+        // Micro dune ripples & gravel physical roughness
+        h += Math.sin(x * 0.25) * Math.cos(z * 0.25) * 0.14;
+        h += Math.sin(x * 1.8) * Math.cos(z * 1.8) * 0.04;
 
         const craterGridSize = 240;
         const cx = Math.floor((x + craterGridSize / 2) / craterGridSize) * craterGridSize;
@@ -239,24 +311,14 @@ class MarsWorld {
         this.scene.add(this.atmosphereDome);
     }
 
-    /**
-     * Astronomically Accurate Mars Sun Mesh & Blue Scattering Halo
-     * - Angular diameter scaled to Mars's 1.524 AU distance (65% of Earth's solar disk diameter)
-     * - Signature Martian Blue Sunset/Sunrise Mie Scattering Halo
-     */
     initAstronomicalSun() {
         this.sunGroup = new THREE.Group();
 
-        // 1. Crisp Solar Body Disk (Astronomically sized: 1.0m radius at 300m sky distance = 0.35° angular diameter)
         const diskGeo = new THREE.SphereGeometry(1.0, 32, 32);
-        const diskMat = new THREE.MeshBasicMaterial({
-            color: 0xfffaee,
-            fog: false
-        });
+        const diskMat = new THREE.MeshBasicMaterial({ color: 0xfffaee, fog: false });
         this.sunDisk = new THREE.Mesh(diskGeo, diskMat);
         this.sunGroup.add(this.sunDisk);
 
-        // 2. White/Yellow Solar Corona Glow
         const haloMat = new THREE.SpriteMaterial({
             map: this.sunGlowTexture,
             color: 0xfff0dd,
@@ -269,11 +331,10 @@ class MarsWorld {
         this.sunHalo.scale.set(14, 14, 1);
         this.sunGroup.add(this.sunHalo);
 
-        // 3. Signature Martian Blue Sunset/Sunrise Mie Scattering Aura Sprite
         const blueMat = new THREE.SpriteMaterial({
             map: this.blueAuraTexture,
             transparent: true,
-            opacity: 0.0, // Active during low solar elevation (sunsets & sunrises)
+            opacity: 0.0,
             blending: THREE.AdditiveBlending,
             fog: false
         });
@@ -294,11 +355,11 @@ class MarsWorld {
 
         const terrainMat = new THREE.MeshStandardMaterial({
             vertexColors: true,
-            roughness: 0.88,
-            metalness: 0.12,
+            roughness: 0.85,
+            metalness: 0.15,
             flatShading: false,
             normalMap: this.proceduralTextures.normalMap,
-            normalScale: new THREE.Vector2(0.65, 0.65),
+            normalScale: new THREE.Vector2(1.4, 1.4), // Enhanced crispness for ground surface granularity
             roughnessMap: this.proceduralTextures.roughnessMap
         });
 
@@ -448,8 +509,9 @@ class MarsWorld {
         this.scene.add(this.dustParticles);
     }
 
+    // Layer 1: High-Granularity Volumetric Dust Plume System (250 particles)
     initWheelDustSystem() {
-        const maxDust = 120;
+        const maxDust = 250;
         const geo = new THREE.BufferGeometry();
         const positions = new Float32Array(maxDust * 3);
 
@@ -457,10 +519,10 @@ class MarsWorld {
 
         const pMat = new THREE.PointsMaterial({
             color: 0xe65c00,
-            size: 2.4,
-            map: this.softParticleTexture,
+            size: 3.2, // Billowing, textured dust clouds
+            map: this.granularDustTexture,
             transparent: true,
-            opacity: 0.65,
+            opacity: 0.75,
             depthWrite: false,
             blending: THREE.AdditiveBlending
         });
@@ -469,76 +531,103 @@ class MarsWorld {
         this.scene.add(this.wheelDustSystem);
 
         for (let i = 0; i < maxDust; i++) {
-            this.wheelDustPositions.push({ x: 0, y: -100, z: 0, life: 0 });
+            this.wheelDustPositions.push({ x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, life: 0 });
+        }
+    }
+
+    // Layer 2: Sharp Micro-Sand & Gravel Kickback Spray System (150 particles)
+    initSandSparksSystem() {
+        const maxSparks = 150;
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(maxSparks * 3);
+
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const pMat = new THREE.PointsMaterial({
+            color: 0xffb870,
+            size: 0.8, // Sharp, granular sand specks
+            map: this.sandGrainTexture,
+            transparent: true,
+            opacity: 0.95,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+
+        this.sandSparksSystem = new THREE.Points(geo, pMat);
+        this.scene.add(this.sandSparksSystem);
+
+        for (let i = 0; i < maxSparks; i++) {
+            this.sandSparksPositions.push({ x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, life: 0 });
         }
     }
 
     triggerWheelDust(roverPos, speed, isDrifting = false) {
         if (Math.abs(speed) < 0.8) return;
 
-        const freeIndex = this.wheelDustPositions.findIndex(p => p.life <= 0);
-        if (freeIndex !== -1) {
-            const spread = isDrifting ? 2.8 : 1.6;
-            this.wheelDustPositions[freeIndex] = {
+        const speedRatio = Math.min(1.5, Math.abs(speed) / 16.0);
+
+        // 1. Emit Granular Dust Smoke Plumes
+        const freeDustIdx = this.wheelDustPositions.findIndex(p => p.life <= 0);
+        if (freeDustIdx !== -1) {
+            const spread = isDrifting ? 3.2 : 1.8;
+            this.wheelDustPositions[freeDustIdx] = {
                 x: roverPos.x + (Math.random() - 0.5) * spread,
-                y: roverPos.y + 0.2,
+                y: roverPos.y + 0.15,
                 z: roverPos.z + (Math.random() - 0.5) * spread,
-                vx: (Math.random() - 0.5) * (isDrifting ? 2.5 : 1.2),
-                vy: 0.8 + Math.random() * (isDrifting ? 1.8 : 1.0),
-                vz: (Math.random() - 0.5) * (isDrifting ? 2.5 : 1.2),
-                life: isDrifting ? 1.4 : 1.0
+                vx: (Math.random() - 0.5) * (isDrifting ? 3.0 : 1.4) * speedRatio,
+                vy: 0.9 + Math.random() * (isDrifting ? 2.2 : 1.2) * speedRatio,
+                vz: (Math.random() - 0.5) * (isDrifting ? 3.0 : 1.4) * speedRatio,
+                life: isDrifting ? 1.6 : 1.1
+            };
+        }
+
+        // 2. Emit Sharp Sand/Gravel Kickback Specks (Granular Tire Spray)
+        const freeSparkIdx = this.sandSparksPositions.findIndex(p => p.life <= 0);
+        if (freeSparkIdx !== -1) {
+            this.sandSparksPositions[freeSparkIdx] = {
+                x: roverPos.x + (Math.random() - 0.5) * 1.4,
+                y: roverPos.y + 0.1,
+                z: roverPos.z + (Math.random() - 0.5) * 1.4,
+                vx: (Math.random() - 0.5) * 4.5 * speedRatio,
+                vy: 1.5 + Math.random() * 3.5 * speedRatio, // Kick upward & back
+                vz: (Math.random() - 0.5) * 4.5 * speedRatio,
+                life: 0.4 + Math.random() * 0.4
             };
         }
     }
 
-    /**
-     * Astronomically Accurate Mars Solar Motion Calculation
-     * - Uses exact Mars obliquity (25.19°) & Jezero Crater Latitude (18.38° N)
-     * - Computes real astronomical elevation & azimuth angles
-     * - Dynamically drives Rayleigh/Mie Blue Sunset Scattering Aura!
-     */
     updateAstronomicalDayNightCycle(deltaTime, roverPos) {
-        // 12-minute full Martian Sol Cycle
         this.dayTime = (this.dayTime + deltaTime * (1 / 720)) % 1.0;
 
-        // Astronomical Solar Motion Equations
-        const lat = 18.38 * (Math.PI / 180);  // Jezero crater latitude
-        const decl = 25.19 * (Math.PI / 180) * Math.sin(this.dayTime * Math.PI * 2); // Mars seasonal declination
-        const hourAngle = (this.dayTime - 0.5) * Math.PI * 2; // Hour angle (-PI to +PI)
+        const lat = 18.38 * (Math.PI / 180);
+        const decl = 25.19 * (Math.PI / 180) * Math.sin(this.dayTime * Math.PI * 2);
+        const hourAngle = (this.dayTime - 0.5) * Math.PI * 2;
 
-        // Solar Elevation Angle h
         const sinElevation = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(hourAngle);
         const elevation = Math.asin(Math.min(1, Math.max(-1, sinElevation)));
 
-        // Solar Azimuth Angle A
         const cosAzimuth = (Math.sin(decl) - Math.sin(lat) * sinElevation) / (Math.cos(lat) * Math.cos(elevation) + 0.0001);
         const azimuth = hourAngle >= 0 ? Math.acos(Math.min(1, Math.max(-1, cosAzimuth))) : -Math.acos(Math.min(1, Math.max(-1, cosAzimuth)));
 
-        // Celestial Sphere Radius for Sun Object
         const skyRadius = 300;
         const refPos = roverPos || new THREE.Vector3(0, 0, 0);
 
-        // Calculate exact 3D astronomical position vector relative to Rover
         const sunX = refPos.x + skyRadius * Math.cos(elevation) * Math.sin(azimuth);
         const sunY = refPos.y + skyRadius * Math.sin(elevation);
         const sunZ = refPos.z - skyRadius * Math.cos(elevation) * Math.cos(azimuth);
 
-        // Update Sun 3D Object Group Position
         if (this.sunGroup) {
             this.sunGroup.position.set(sunX, sunY, sunZ);
-            this.sunGroup.lookAt(refPos); // Orient glowing sprite billboards facing camera
+            this.sunGroup.lookAt(refPos);
         }
 
-        // Update Directional Sunlight Position
         if (this.sunLight) {
             this.sunLight.position.set(sunX, Math.max(refPos.y + 10, sunY), sunZ);
         }
 
-        // Astronomical Atmosphere & Color Gradient Processing
         const elevDeg = elevation * (180 / Math.PI);
 
         if (elevDeg < -6) {
-            // Astronomical Night: Deep Martian Night Sky
             this.scene.fog.color.setHSL(0.62, 0.5, 0.04);
             this.scene.background.setHSL(0.62, 0.5, 0.04);
             if (this.sunLight) {
@@ -551,10 +640,7 @@ class MarsWorld {
             if (this.sunHalo) this.sunHalo.visible = false;
 
         } else if (elevDeg >= -6 && elevDeg <= 22) {
-            // Sunrise / Sunset: Famous Martian Blue Sunset Phenomenon (Mie Forward Scattering)!
-            const t = (elevDeg + 6) / 28.0; // 0 to 1 transition factor
-            
-            // Sky & Fog transition from dark rust to bright butterscotch
+            const t = (elevDeg + 6) / 28.0;
             const fogHue = 0.02 + t * 0.03;
             const fogSat = 0.75;
             const fogLight = 0.12 + t * 0.32;
@@ -567,7 +653,6 @@ class MarsWorld {
             }
             if (this.ambientLight) this.ambientLight.intensity = 0.3 + t * 0.45;
 
-            // Intense Blue Sunset Scattering Aura centered directly around the Solar Disk!
             const blueIntensity = Math.sin(Math.min(1, (elevDeg + 6) / 24) * Math.PI);
             if (this.blueSunsetHalo) {
                 this.blueSunsetHalo.material.opacity = blueIntensity * 0.95;
@@ -575,7 +660,7 @@ class MarsWorld {
 
             if (this.sunDisk) {
                 this.sunDisk.visible = true;
-                this.sunDisk.material.color.setHSL(0.58, 0.4, 0.9); // Distinct pale blueish-white solar disk
+                this.sunDisk.material.color.setHSL(0.58, 0.4, 0.9);
             }
             if (this.sunHalo) {
                 this.sunHalo.visible = true;
@@ -583,7 +668,6 @@ class MarsWorld {
             }
 
         } else {
-            // High Daytime Sun: Butterscotch Mars Sky
             this.scene.fog.color.setHSL(0.05, 0.7, 0.42);
             this.scene.background.setHSL(0.05, 0.7, 0.42);
 
@@ -593,10 +677,10 @@ class MarsWorld {
             }
             if (this.ambientLight) this.ambientLight.intensity = 0.75;
 
-            if (this.blueSunsetHalo) this.blueSunsetHalo.material.opacity = 0.15; // Subtle daytime scattering
+            if (this.blueSunsetHalo) this.blueSunsetHalo.material.opacity = 0.15;
             if (this.sunDisk) {
                 this.sunDisk.visible = true;
-                this.sunDisk.material.color.setHex(0xfffaee); // Crisp pale warm solar disk
+                this.sunDisk.material.color.setHex(0xfffaee);
             }
             if (this.sunHalo) {
                 this.sunHalo.visible = true;
@@ -613,7 +697,7 @@ class MarsWorld {
             this.updateInfiniteRocks(roverPos);
         }
 
-        // Update wheel dust particle animation
+        // 1. Update Granular Dust Smoke Plumes Animation
         if (this.wheelDustSystem) {
             const posAttr = this.wheelDustSystem.geometry.attributes.position;
             this.wheelDustPositions.forEach((p, idx) => {
@@ -621,7 +705,24 @@ class MarsWorld {
                     p.x += p.vx * deltaTime;
                     p.y += p.vy * deltaTime;
                     p.z += p.vz * deltaTime;
-                    p.life -= deltaTime * 1.2;
+                    p.life -= deltaTime * 1.1;
+                    posAttr.setXYZ(idx, p.x, p.y, p.z);
+                } else {
+                    posAttr.setXYZ(idx, 0, -100, 0);
+                }
+            });
+            posAttr.needsUpdate = true;
+        }
+
+        // 2. Update Sharp Sand Kickback Specks Animation
+        if (this.sandSparksSystem) {
+            const posAttr = this.sandSparksSystem.geometry.attributes.position;
+            this.sandSparksPositions.forEach((p, idx) => {
+                if (p.life > 0) {
+                    p.x += p.vx * deltaTime;
+                    p.y += p.vy * deltaTime - 3.5 * deltaTime; // gravity pull
+                    p.z += p.vz * deltaTime;
+                    p.life -= deltaTime * 2.2;
                     posAttr.setXYZ(idx, p.x, p.y, p.z);
                 } else {
                     posAttr.setXYZ(idx, 0, -100, 0);
