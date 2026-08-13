@@ -1,6 +1,6 @@
 /**
  * Mars World Generator: Pure Infinite Procedural Terrain, Dynamic Sky, Volumetric Weather & Particle Systems
- * Implements Chunkless Grid-Shifting Infinite Terrain, Deterministic Object Pooling, and 2D Perlin-Noise Mars Dunes
+ * Implements Astronomically Accurate Mars Solar Motion, Blue Sunsets/Sunrises (Mie Scattering), and Infinite Terrain
  */
 class MarsWorld {
     constructor(scene) {
@@ -18,9 +18,15 @@ class MarsWorld {
         this.wheelDustSystem = null;
         this.wheelDustPositions = [];
         this.atmosphereDome = null;
-        this.dayTime = 0.25; // 0 to 1 cycle
+        this.dayTime = 0.25; // 0 to 1 sol cycle (0.25 = sunrise/morning, 0.5 = solar noon, 0.75 = sunset)
         this.sunLight = null;
         this.ambientLight = null;
+
+        // Astronomically Accurate Sun Objects
+        this.sunGroup = null;
+        this.sunDisk = null;
+        this.sunHalo = null;
+        this.blueSunsetHalo = null;
 
         // Rock pooling for infinite procedural scattering
         this.rockPool = [];
@@ -28,11 +34,14 @@ class MarsWorld {
 
         // Particle textures & procedural normal maps
         this.softParticleTexture = this.createSoftParticleTexture();
+        this.sunGlowTexture = this.createSunGlowTexture();
+        this.blueAuraTexture = this.createBlueAuraTexture();
         this.proceduralTextures = this.createProceduralTerrainTextures();
 
         this.initLightingAndFog();
         this.initSkyAndMoons();
         this.initAtmosphereDome();
+        this.initAstronomicalSun();
         this.initInfiniteTerrain();
         this.initRockPool();
         this.initDustParticles();
@@ -54,6 +63,48 @@ class MarsWorld {
 
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, 64, 64);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        return tex;
+    }
+
+    // Canvas 2D texture for white/yellow Solar Corona Glow
+    createSunGlowTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(255, 255, 240, 1.0)');
+        grad.addColorStop(0.2, 'rgba(255, 230, 180, 0.7)');
+        grad.addColorStop(0.5, 'rgba(255, 160, 90, 0.25)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 128, 128);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        return tex;
+    }
+
+    // Canvas 2D texture for Martian Blue Rayleigh/Mie Scattering Sunset Aura
+    createBlueAuraTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+        grad.addColorStop(0, 'rgba(160, 220, 255, 0.95)');
+        grad.addColorStop(0.25, 'rgba(70, 165, 255, 0.65)');
+        grad.addColorStop(0.6, 'rgba(30, 100, 210, 0.25)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 256, 256);
 
         const tex = new THREE.CanvasTexture(canvas);
         tex.needsUpdate = true;
@@ -118,15 +169,12 @@ class MarsWorld {
      * Valid for any (x, z) from -infinity to +infinity!
      */
     getTerrainHeight(x, z) {
-        // Multi-octave rolling dunes
         let h = Math.sin(x * 0.015) * Math.cos(z * 0.015) * 5.5;
         h += Math.sin(x * 0.038 + 1.4) * Math.sin(z * 0.038) * 2.2;
         h += Math.cos(x * 0.085) * Math.sin(z * 0.085) * 0.7;
 
-        // Micro ripples
         h += Math.sin(x * 0.2) * Math.cos(z * 0.2) * 0.12;
 
-        // Periodic crater dishes spaced every ~240m
         const craterGridSize = 240;
         const cx = Math.floor((x + craterGridSize / 2) / craterGridSize) * craterGridSize;
         const cz = Math.floor((z + craterGridSize / 2) / craterGridSize) * craterGridSize;
@@ -189,6 +237,51 @@ class MarsWorld {
         const domeMat = new THREE.MeshBasicMaterial({ color: 0xd95738, side: THREE.BackSide, transparent: true, opacity: 0.85 });
         this.atmosphereDome = new THREE.Mesh(domeGeo, domeMat);
         this.scene.add(this.atmosphereDome);
+    }
+
+    /**
+     * Astronomically Accurate Mars Sun Mesh & Blue Scattering Halo
+     * - Angular diameter scaled to Mars's 1.524 AU distance (65% of Earth's solar disk diameter)
+     * - Signature Martian Blue Sunset/Sunrise Mie Scattering Halo
+     */
+    initAstronomicalSun() {
+        this.sunGroup = new THREE.Group();
+
+        // 1. Crisp Solar Body Disk (Astronomically sized: 1.0m radius at 300m sky distance = 0.35° angular diameter)
+        const diskGeo = new THREE.SphereGeometry(1.0, 32, 32);
+        const diskMat = new THREE.MeshBasicMaterial({
+            color: 0xfffaee,
+            fog: false
+        });
+        this.sunDisk = new THREE.Mesh(diskGeo, diskMat);
+        this.sunGroup.add(this.sunDisk);
+
+        // 2. White/Yellow Solar Corona Glow
+        const haloMat = new THREE.SpriteMaterial({
+            map: this.sunGlowTexture,
+            color: 0xfff0dd,
+            transparent: true,
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            fog: false
+        });
+        this.sunHalo = new THREE.Sprite(haloMat);
+        this.sunHalo.scale.set(14, 14, 1);
+        this.sunGroup.add(this.sunHalo);
+
+        // 3. Signature Martian Blue Sunset/Sunrise Mie Scattering Aura Sprite
+        const blueMat = new THREE.SpriteMaterial({
+            map: this.blueAuraTexture,
+            transparent: true,
+            opacity: 0.0, // Active during low solar elevation (sunsets & sunrises)
+            blending: THREE.AdditiveBlending,
+            fog: false
+        });
+        this.blueSunsetHalo = new THREE.Sprite(blueMat);
+        this.blueSunsetHalo.scale.set(45, 45, 1);
+        this.sunGroup.add(this.blueSunsetHalo);
+
+        this.scene.add(this.sunGroup);
     }
 
     initInfiniteTerrain() {
@@ -398,34 +491,122 @@ class MarsWorld {
         }
     }
 
-    updateDayNightCycle(deltaTime) {
-        // 12-minute full Martian Day/Night Cycle
+    /**
+     * Astronomically Accurate Mars Solar Motion Calculation
+     * - Uses exact Mars obliquity (25.19°) & Jezero Crater Latitude (18.38° N)
+     * - Computes real astronomical elevation & azimuth angles
+     * - Dynamically drives Rayleigh/Mie Blue Sunset Scattering Aura!
+     */
+    updateAstronomicalDayNightCycle(deltaTime, roverPos) {
+        // 12-minute full Martian Sol Cycle
         this.dayTime = (this.dayTime + deltaTime * (1 / 720)) % 1.0;
-        const sunAngle = this.dayTime * Math.PI * 2;
 
-        const sunX = Math.cos(sunAngle) * 120;
-        const sunY = Math.sin(sunAngle) * 90;
-        const sunZ = Math.sin(sunAngle * 0.5) * 100;
+        // Astronomical Solar Motion Equations
+        const lat = 18.38 * (Math.PI / 180);  // Jezero crater latitude
+        const decl = 25.19 * (Math.PI / 180) * Math.sin(this.dayTime * Math.PI * 2); // Mars seasonal declination
+        const hourAngle = (this.dayTime - 0.5) * Math.PI * 2; // Hour angle (-PI to +PI)
 
+        // Solar Elevation Angle h
+        const sinElevation = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(hourAngle);
+        const elevation = Math.asin(Math.min(1, Math.max(-1, sinElevation)));
+
+        // Solar Azimuth Angle A
+        const cosAzimuth = (Math.sin(decl) - Math.sin(lat) * sinElevation) / (Math.cos(lat) * Math.cos(elevation) + 0.0001);
+        const azimuth = hourAngle >= 0 ? Math.acos(Math.min(1, Math.max(-1, cosAzimuth))) : -Math.acos(Math.min(1, Math.max(-1, cosAzimuth)));
+
+        // Celestial Sphere Radius for Sun Object
+        const skyRadius = 300;
+        const refPos = roverPos || new THREE.Vector3(0, 0, 0);
+
+        // Calculate exact 3D astronomical position vector relative to Rover
+        const sunX = refPos.x + skyRadius * Math.cos(elevation) * Math.sin(azimuth);
+        const sunY = refPos.y + skyRadius * Math.sin(elevation);
+        const sunZ = refPos.z - skyRadius * Math.cos(elevation) * Math.cos(azimuth);
+
+        // Update Sun 3D Object Group Position
+        if (this.sunGroup) {
+            this.sunGroup.position.set(sunX, sunY, sunZ);
+            this.sunGroup.lookAt(refPos); // Orient glowing sprite billboards facing camera
+        }
+
+        // Update Directional Sunlight Position
         if (this.sunLight) {
-            this.sunLight.position.set(sunX, Math.max(10, sunY), sunZ);
+            this.sunLight.position.set(sunX, Math.max(refPos.y + 10, sunY), sunZ);
+        }
+
+        // Astronomical Atmosphere & Color Gradient Processing
+        const elevDeg = elevation * (180 / Math.PI);
+
+        if (elevDeg < -6) {
+            // Astronomical Night: Deep Martian Night Sky
+            this.scene.fog.color.setHSL(0.62, 0.5, 0.04);
+            this.scene.background.setHSL(0.62, 0.5, 0.04);
+            if (this.sunLight) {
+                this.sunLight.intensity = 0.05;
+                this.sunLight.color.setHSL(0.6, 0.4, 0.2);
+            }
+            if (this.ambientLight) this.ambientLight.intensity = 0.15;
+            if (this.blueSunsetHalo) this.blueSunsetHalo.material.opacity = 0;
+            if (this.sunDisk) this.sunDisk.visible = false;
+            if (this.sunHalo) this.sunHalo.visible = false;
+
+        } else if (elevDeg >= -6 && elevDeg <= 22) {
+            // Sunrise / Sunset: Famous Martian Blue Sunset Phenomenon (Mie Forward Scattering)!
+            const t = (elevDeg + 6) / 28.0; // 0 to 1 transition factor
             
-            if (sunY < 20) {
-                this.scene.fog.color.setHSL(0.02, 0.75, 0.12);
-                this.scene.background.setHSL(0.02, 0.75, 0.12);
-                this.sunLight.color.setHSL(0.05, 0.9, 0.4);
-                this.ambientLight.intensity = 0.3;
-            } else {
-                this.scene.fog.color.setHSL(0.05, 0.7, 0.42);
-                this.scene.background.setHSL(0.05, 0.7, 0.42);
-                this.sunLight.color.setHSL(0.08, 0.8, 0.65);
-                this.ambientLight.intensity = 0.75;
+            // Sky & Fog transition from dark rust to bright butterscotch
+            const fogHue = 0.02 + t * 0.03;
+            const fogSat = 0.75;
+            const fogLight = 0.12 + t * 0.32;
+            this.scene.fog.color.setHSL(fogHue, fogSat, fogLight);
+            this.scene.background.setHSL(fogHue, fogSat, fogLight);
+
+            if (this.sunLight) {
+                this.sunLight.intensity = 0.4 + t * 1.2;
+                this.sunLight.color.setHSL(0.06, 0.9, 0.5 + t * 0.2);
+            }
+            if (this.ambientLight) this.ambientLight.intensity = 0.3 + t * 0.45;
+
+            // Intense Blue Sunset Scattering Aura centered directly around the Solar Disk!
+            const blueIntensity = Math.sin(Math.min(1, (elevDeg + 6) / 24) * Math.PI);
+            if (this.blueSunsetHalo) {
+                this.blueSunsetHalo.material.opacity = blueIntensity * 0.95;
+            }
+
+            if (this.sunDisk) {
+                this.sunDisk.visible = true;
+                this.sunDisk.material.color.setHSL(0.58, 0.4, 0.9); // Distinct pale blueish-white solar disk
+            }
+            if (this.sunHalo) {
+                this.sunHalo.visible = true;
+                this.sunHalo.material.opacity = 0.85;
+            }
+
+        } else {
+            // High Daytime Sun: Butterscotch Mars Sky
+            this.scene.fog.color.setHSL(0.05, 0.7, 0.42);
+            this.scene.background.setHSL(0.05, 0.7, 0.42);
+
+            if (this.sunLight) {
+                this.sunLight.intensity = 1.6;
+                this.sunLight.color.setHSL(0.08, 0.8, 0.7);
+            }
+            if (this.ambientLight) this.ambientLight.intensity = 0.75;
+
+            if (this.blueSunsetHalo) this.blueSunsetHalo.material.opacity = 0.15; // Subtle daytime scattering
+            if (this.sunDisk) {
+                this.sunDisk.visible = true;
+                this.sunDisk.material.color.setHex(0xfffaee); // Crisp pale warm solar disk
+            }
+            if (this.sunHalo) {
+                this.sunHalo.visible = true;
+                this.sunHalo.material.opacity = 0.85;
             }
         }
     }
 
     update(deltaTime, roverPos) {
-        this.updateDayNightCycle(deltaTime);
+        this.updateAstronomicalDayNightCycle(deltaTime, roverPos);
 
         if (roverPos) {
             this.updateInfiniteTerrain(roverPos);
