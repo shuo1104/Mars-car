@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>火星“流浪者1号”探索车 - Wanderer 1 Mars Rover Explorer</title>
+    <title>火星“流浪者1号”漫游探索 - Wanderer 1 Mars Rover Explorer</title>
     <link rel="stylesheet" href="style.css">
     <!-- Google Fonts for futuristic typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,97 +23,31 @@
     <!-- 3D Canvas Container -->
     <div id="game-container"></div>
 
-    <!-- 3D World-to-Screen HUD Target Markers Container -->
-    <div id="target-markers-container"></div>
-
-    <!-- Sandstorm Fullscreen Filter Effect -->
+    <!-- Sandstorm Atmosphere Overlay -->
     <div id="sandstorm-overlay" class="sandstorm-overlay"></div>
 
-    <!-- HUD Overlay -->
+    <!-- Ultra-Clean Minimal HUD Overlay -->
     <div id="hud">
-        <!-- Top Left: Rover Status & Diagnostics -->
+        <!-- Top Left: Minimal Rover Title -->
         <div class="hud-panel top-left">
             <div class="panel-header">
                 <span class="badge">WANDERER-1</span>
                 <span class="status-indicator active"></span>
-                <span class="title">流浪者1号 状态诊断</span>
-            </div>
-            <div class="stat-group">
-                <div class="stat-label">
-                    <span>主电池电量 (BATTERY)</span>
-                    <span id="battery-text">100%</span>
-                </div>
-                <div class="progress-bar-container">
-                    <div id="battery-bar" class="progress-bar fill-battery" style="width: 100%;"></div>
-                </div>
-            </div>
-            <div class="stat-group">
-                <div class="stat-label">
-                    <span>太阳能充电效率 (SOLAR ARRAY)</span>
-                    <span id="solar-text">0.0 kW/h</span>
-                </div>
-                <div class="progress-bar-container">
-                    <div id="solar-bar" class="progress-bar fill-solar" style="width: 0%;"></div>
-                </div>
-            </div>
-            <div class="stat-row">
-                <div class="mini-stat">
-                    <span class="lbl">驾驶模式</span>
-                    <span id="drive-mode" class="val highlight">标准 EXPLORE</span>
-                </div>
-                <div class="mini-stat">
-                    <span class="lbl">地表温度</span>
-                    <span id="temp-val" class="val">-62 °C</span>
-                </div>
+                <span class="title">火星漫游探索</span>
             </div>
         </div>
 
-        <!-- Top Right: Radar & Compass -->
+        <!-- Top Right: Coordinates & Audio -->
         <div class="hud-panel top-right">
             <div class="panel-header">
-                <span class="title">火星地表高空雷达</span>
                 <span id="nav-coords" class="coords">X: 000 | Z: 000</span>
-            </div>
-            <div class="radar-box">
-                <canvas id="radar-canvas" width="160" height="160"></canvas>
-                <div class="radar-scanline"></div>
-                <div class="radar-legend">
-                    <span><i class="dot rover"></i> 车</span>
-                    <span><i class="dot sample"></i> 样本</span>
-                    <span><i class="dot beacon"></i> 信标</span>
-                </div>
+                <button id="btn-audio" class="hud-btn mini">
+                    <svg id="icon-sound-on" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                </button>
             </div>
         </div>
 
-        <!-- Center Notification Banner -->
-        <div id="alert-banner" class="alert-banner hidden">
-            <div class="alert-icon">⚠️</div>
-            <div class="alert-content">
-                <div id="alert-title" class="alert-title">警告：火星沙尘暴来袭</div>
-                <div id="alert-msg" class="alert-msg">高浓度尘埃降低能见度，建议暂停快速驾驶并充电</div>
-            </div>
-        </div>
-
-        <!-- Target Scan Overlay (Appears when near collectible target) -->
-        <div id="scan-target-panel" class="scan-target-panel hidden">
-            <div class="target-bracket">
-                <div class="corner top-left"></div>
-                <div class="corner top-right"></div>
-                <div class="corner bottom-left"></div>
-                <div class="corner bottom-right"></div>
-                <div class="target-info">
-                    <div class="target-tag">检测到科学样本目标</div>
-                    <div id="target-name" class="target-title">橄榄石深层岩样 (Peridotite)</div>
-                    <div id="target-distance" class="target-dist">距离: 4.2 米</div>
-                    <div class="scan-progress-wrap">
-                        <div id="scan-progress-bar" class="scan-bar" style="width: 0%;"></div>
-                    </div>
-                    <div class="scan-hint">按 [E] 键发射激光扫描分析并采集</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bottom Left: Speedometer & Telemetry -->
+        <!-- Bottom Left: Speedometer & Headlight Status -->
         <div class="hud-panel bottom-left">
             <div class="speed-container">
                 <div class="speed-dial">
@@ -122,58 +56,25 @@
                 </div>
                 <div class="telemetry">
                     <div class="telem-item">
-                        <span class="label">俯仰 Pitch</span>
-                        <span id="pitch-val" class="val">0.0°</span>
-                    </div>
-                    <div class="telem-item">
-                        <span class="label">翻滚 Roll</span>
-                        <span id="roll-val" class="val">0.0°</span>
-                    </div>
-                    <div class="telem-item">
-                        <span class="label">大灯光源</span>
+                        <span class="label">探照大灯</span>
                         <span id="headlight-status" class="val badge-off">关闭 [L]</span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Bottom Center: Controls Bar -->
+        <!-- Bottom Center: Essential Controls Bar (WASD & L) -->
         <div class="hud-panel bottom-center">
             <div class="controls-hint-bar">
                 <div class="key-item"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>驾驶移动</span></div>
+                <div class="key-item"><kbd>L</kbd><span>开关大灯</span></div>
+                <div class="key-item"><kbd>C</kbd><span>切换视角</span></div>
                 <div class="key-item"><kbd>Space</kbd><span>刹车</span></div>
-                <div class="key-item"><kbd>E</kbd><span>激光扫描/采样</span></div>
-                <div class="key-item"><kbd>R</kbd><span>太阳能充能模式</span></div>
-                <div class="key-item"><kbd>C</kbd><span>视角 [追随/第一人称/高空]</span></div>
-                <div class="key-item"><kbd>L</kbd><span>开启探照灯</span></div>
-            </div>
-        </div>
-
-        <!-- Bottom Right: Inventory & Action Controls -->
-        <div class="hud-panel bottom-right">
-            <div class="inventory-summary">
-                <div class="inv-header">
-                    <span>已收集火星样本</span>
-                    <span id="sample-count-badge" class="count-badge">0 / 8</span>
-                </div>
-                <div class="inv-buttons">
-                    <button id="btn-logbook" class="hud-btn glow">
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                        科学日志 (LOGS)
-                    </button>
-                    <button id="btn-audio" class="hud-btn">
-                        <svg id="icon-sound-on" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                        音效开启
-                    </button>
-                    <button id="btn-help" class="hud-btn">
-                        帮助 [H]
-                    </button>
-                </div>
             </div>
         </div>
     </div>
 
-    <!-- On-screen Touch Controls for Mobile/Tablet -->
+    <!-- Mobile Touch Controls -->
     <div id="touch-controls" class="touch-controls">
         <div class="dpad">
             <button id="btn-up" class="dbtn up">▲</button>
@@ -182,72 +83,8 @@
             <button id="btn-down" class="dbtn down">▼</button>
         </div>
         <div class="action-btns">
-            <button id="btn-action-e" class="abtn scan-btn">扫描 [E]</button>
-            <button id="btn-action-r" class="abtn charge-btn">充电 [R]</button>
+            <button id="btn-action-l" class="abtn light-btn">大灯 [L]</button>
             <button id="btn-action-c" class="abtn cam-btn">视角 [C]</button>
-        </div>
-    </div>
-
-    <!-- Logbook / Scientific Discoveries Modal -->
-    <div id="log-modal" class="modal-backdrop hidden">
-        <div class="modal-box">
-            <div class="modal-header">
-                <h2>火星“流浪者1号”科学探索档案手册</h2>
-                <button id="btn-close-log" class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="modal-tabs">
-                    <button class="tab-btn active" data-tab="samples">采集标本 (<span id="modal-sample-count">0</span>/8)</button>
-                    <button class="tab-btn" data-tab="rover-specs">探索车参数指南</button>
-                    <button class="tab-btn" data-tab="mars-lore">火星地理志</button>
-                </div>
-                <div class="tab-content" id="tab-samples">
-                    <div id="samples-grid" class="samples-grid">
-                        <!-- Dynamically filled with collected samples -->
-                    </div>
-                </div>
-                <div class="tab-content hidden" id="tab-rover-specs">
-                    <div class="specs-card">
-                        <h3>流浪者1号 (Wanderer-1 Rover Specification)</h3>
-                        <ul>
-                            <li><strong>质量 / 长度：</strong> 890 kg / 2.8 米</li>
-                            <li><strong>动力系统：</strong> 双阵列高效率 GaAs 太阳能翼板 + 放射性同位素热电发电机 (RTG) 辅助</li>
-                            <li><strong>底盘悬挂：</strong> Rocker-Bogie 摇臂-转向架式 6 轮独立驱动悬挂，可跨越 35cm 障壁</li>
-                            <li><strong>探测载荷：</strong> SuperCam 脉冲激光光谱仪、Alpha 粒子 X 射线光谱仪、Mastcam-Z 双目全景相机</li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="tab-content hidden" id="tab-mars-lore">
-                    <div class="specs-card">
-                        <h3>探索区域：耶泽罗撞击坑 (Jezero Crater)</h3>
-                        <p>该撞击坑直径约 45 公里，据推测在 37 亿年前曾拥有一个充满液态水的古湖泊及三角洲河流沉积层。流浪者1号在此寻找古老微生物生命的可能地质痕迹。</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Help Modal -->
-    <div id="help-modal" class="modal-backdrop hidden">
-        <div class="modal-box compact">
-            <div class="modal-header">
-                <h2>操作指南与任务说明</h2>
-                <button id="btn-close-help" class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="help-section">
-                    <h4>🕹️ 驾驶与操控：</h4>
-                    <p><kbd>W</kbd> / <kbd>↑</kbd> 前进加速 | <kbd>S</kbd> / <kbd>↓</kbd> 倒车退后</p>
-                    <p><kbd>A</kbd> / <kbd>D</kbd> 向左/向右转向 | <kbd>Space</kbd> 紧急手刹</p>
-                    <p><kbd>C</kbd> 切换视角（后追视角 / 车头第一人称视角 / 顶视俯瞰视角）</p>
-                    <p><kbd>L</kbd> 开关车头强光 LED 探照灯</p>
-                </div>
-                <div class="help-section">
-                    <h4>🔬 科学探索与电量：</h4>
-                    <p><kbd>E</kbd> 当靠近雷达上的黄/蓝色样本点时，按 E 开启脉冲激光扫描采集标本。</p>
-                    <p><kbd>R</kbd> 展开太阳能电池板进入原地充能模式（需防范沙尘暴降低效率）。</p>
-                </div>
-            </div>
         </div>
     </div>
 

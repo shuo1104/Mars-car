@@ -1,11 +1,10 @@
 /**
- * Game Manager & Loop Handler for Mars Rover Explorer
- * Infinite Procedural Exploration Architecture with Zero Startup Popups and Dynamic Driving HUD Fading
+ * Pure Game Manager for Mars Rover Explorer
+ * Focuses 100% on WASD Infinite Driving & L Headlight Controls with Zero Forced Gameplay Modals
  */
 class MarsGame {
     constructor() {
         this.container = document.getElementById('game-container');
-        this.targetMarkersContainer = document.getElementById('target-markers-container');
         this.hudElement = document.getElementById('hud');
 
         this.scene = null;
@@ -17,15 +16,8 @@ class MarsGame {
         this.rover = null;
         this.clock = new THREE.Clock();
 
-        // Game State
-        this.cameraMode = 0; // 0: Chase, 1: POV, 2: Satellite
-        this.battery = 100.0;
-        this.solarPower = 0.0;
-        this.collectedCount = 0;
-        this.discoveredSamples = new Set();
-        this.sandstormTimer = 0;
-        this.isSandstorm = false;
-        this.targetMarkersMap = new Map();
+        // Camera State
+        this.cameraMode = 0; // 0: Chase, 1: POV, 2: Overhead
 
         // Input state
         this.inputs = {
@@ -36,33 +28,12 @@ class MarsGame {
             brake: false
         };
 
-        // DOM elements
+        // Minimal DOM elements
         this.dom = {
-            batteryText: document.getElementById('battery-text'),
-            batteryBar: document.getElementById('battery-bar'),
-            solarText: document.getElementById('solar-text'),
-            solarBar: document.getElementById('solar-bar'),
             speedVal: document.getElementById('speed-val'),
-            pitchVal: document.getElementById('pitch-val'),
-            rollVal: document.getElementById('roll-val'),
             navCoords: document.getElementById('nav-coords'),
-            headlightStatus: document.getElementById('headlight-status'),
-            driveMode: document.getElementById('drive-mode'),
-            scanPanel: document.getElementById('scan-target-panel'),
-            targetName: document.getElementById('target-name'),
-            targetDist: document.getElementById('target-distance'),
-            scanProgressBar: document.getElementById('scan-progress-bar'),
-            sampleCountBadge: document.getElementById('sample-count-badge'),
-            modalSampleCount: document.getElementById('modal-sample-count'),
-            samplesGrid: document.getElementById('samples-grid'),
-            alertBanner: document.getElementById('alert-banner'),
-            sandstormOverlay: document.getElementById('sandstorm-overlay'),
-            radarCanvas: document.getElementById('radar-canvas'),
-            logModal: document.getElementById('log-modal'),
-            helpModal: document.getElementById('help-modal')
+            headlightStatus: document.getElementById('headlight-status')
         };
-
-        this.radarCtx = this.dom.radarCanvas.getContext('2d');
 
         this.initThree();
         this.world = new MarsWorld(this.scene);
@@ -70,9 +41,8 @@ class MarsGame {
 
         this.setupInputs();
         this.setupUIHandlers();
-        this.init3DTargetHUD();
 
-        // Start render loop immediately - Zero forced startup modals!
+        // Start render loop immediately
         this.animate();
     }
 
@@ -121,81 +91,6 @@ class MarsGame {
         window.addEventListener('resize', () => this.onWindowResize());
     }
 
-    init3DTargetHUD() {
-        if (!this.targetMarkersContainer) return;
-        this.targetMarkersContainer.innerHTML = '';
-        this.targetMarkersMap.clear();
-
-        setTimeout(() => {
-            if (!this.world || !this.world.samples) return;
-            this.world.samples.forEach(sample => {
-                const el = document.createElement('div');
-                el.className = 'world-target-marker hidden';
-                el.id = `target-marker-${sample.id}`;
-                el.innerHTML = `
-                    <div class="marker-reticle">
-                        <div class="marker-dot"></div>
-                    </div>
-                    <div class="marker-info">
-                        <span class="marker-tag">TARGET</span>
-                        <span class="marker-title">${sample.name}</span>
-                        <span class="marker-dist">--m</span>
-                    </div>
-                `;
-                this.targetMarkersContainer.appendChild(el);
-                this.targetMarkersMap.set(sample.id, el);
-            });
-        }, 100);
-    }
-
-    update3DTargetHUD() {
-        if (!this.world || !this.world.samples) return;
-
-        const camera = this.camera;
-        const widthHalf = window.innerWidth / 2;
-        const heightHalf = window.innerHeight / 2;
-        const tempVec = new THREE.Vector3();
-        const activeTarget = this.rover.scanTarget;
-
-        this.world.samples.forEach(s => {
-            const markerEl = this.targetMarkersMap.get(s.id);
-            if (!markerEl) return;
-
-            if (s.collected) {
-                markerEl.classList.add('hidden');
-                return;
-            }
-
-            tempVec.set(s.pos.x, s.y + 1.8, s.pos.z);
-            const dist = this.rover.position.distanceTo(tempVec);
-
-            tempVec.project(camera);
-
-            const isBehind = tempVec.z > 1.0;
-            const isOutOfRange = dist > 70;
-
-            if (isBehind || isOutOfRange) {
-                markerEl.classList.add('hidden');
-            } else {
-                const screenX = (tempVec.x * widthHalf) + widthHalf;
-                const screenY = -(tempVec.y * heightHalf) + heightHalf;
-
-                markerEl.style.left = `${screenX}px`;
-                markerEl.style.top = `${screenY}px`;
-                markerEl.classList.remove('hidden');
-
-                const distEl = markerEl.querySelector('.marker-dist');
-                if (distEl) distEl.textContent = `${dist.toFixed(1)}m`;
-
-                if (activeTarget && activeTarget.id === s.id) {
-                    markerEl.classList.add('active-target');
-                } else {
-                    markerEl.classList.remove('active-target');
-                }
-            }
-        });
-    }
-
     setupInputs() {
         const keyMap = {
             'KeyW': 'forward', 'ArrowUp': 'forward',
@@ -213,11 +108,8 @@ class MarsGame {
                 this.inputs[keyMap[e.code]] = true;
             }
 
-            if (e.code === 'KeyC') this.cycleCameraView();
             if (e.code === 'KeyL') this.toggleHeadlights();
-            if (e.code === 'KeyR') this.toggleSolarChargeMode();
-            if (e.code === 'KeyE') this.triggerSampleScan();
-            if (e.code === 'KeyH') this.toggleModal(this.dom.helpModal);
+            if (e.code === 'KeyC') this.cycleCameraView();
         });
 
         window.addEventListener('keyup', (e) => {
@@ -243,50 +135,16 @@ class MarsGame {
         bindTouchBtn('btn-left', 'left');
         bindTouchBtn('btn-right', 'right');
 
-        document.getElementById('btn-action-e')?.addEventListener('click', () => this.triggerSampleScan());
-        document.getElementById('btn-action-r')?.addEventListener('click', () => this.toggleSolarChargeMode());
+        document.getElementById('btn-action-l')?.addEventListener('click', () => this.toggleHeadlights());
         document.getElementById('btn-action-c')?.addEventListener('click', () => this.cycleCameraView());
     }
 
     setupUIHandlers() {
-        document.getElementById('btn-logbook').addEventListener('click', () => {
-            window.roverAudio.playUIClick();
-            this.toggleModal(this.dom.logModal);
-        });
-
-        document.getElementById('btn-audio').addEventListener('click', () => {
+        document.getElementById('btn-audio')?.addEventListener('click', () => {
             const enabled = window.roverAudio.toggleAudio();
-            document.getElementById('btn-audio').style.borderColor = enabled ? '#00e5ff' : '#ff3b30';
+            const btn = document.getElementById('btn-audio');
+            if (btn) btn.style.borderColor = enabled ? '#00e5ff' : '#ff3b30';
         });
-
-        document.getElementById('btn-help').addEventListener('click', () => {
-            window.roverAudio.playUIClick();
-            this.toggleModal(this.dom.helpModal);
-        });
-
-        document.getElementById('btn-close-log').addEventListener('click', () => this.toggleModal(this.dom.logModal, false));
-        document.getElementById('btn-close-help').addEventListener('click', () => this.toggleModal(this.dom.helpModal, false));
-
-        // Tab Switching in Log Modal
-        const tabs = document.querySelectorAll('.tab-btn');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                window.roverAudio.playUIClick();
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-
-                const targetTab = tab.getAttribute('data-tab');
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-                document.getElementById(`tab-${targetTab}`).classList.remove('hidden');
-            });
-        });
-    }
-
-    toggleModal(modalEl, forceState) {
-        const isHidden = modalEl.classList.contains('hidden');
-        const show = forceState !== undefined ? forceState : isHidden;
-        if (show) modalEl.classList.remove('hidden');
-        else modalEl.classList.add('hidden');
     }
 
     cycleCameraView() {
@@ -298,123 +156,9 @@ class MarsGame {
         window.roverAudio.playUIClick();
         const state = !this.rover.headlightsOn;
         this.rover.setHeadlights(state);
-        this.dom.headlightStatus.textContent = state ? "开启 [L]" : "关闭 [L]";
-        this.dom.headlightStatus.className = `val ${state ? 'badge-on' : 'badge-off'}`;
-    }
-
-    toggleSolarChargeMode() {
-        window.roverAudio.playUIClick();
-        const charging = !this.rover.isChargingMode;
-        this.rover.setChargingMode(charging);
-        this.dom.driveMode.textContent = charging ? "太阳能充能 CHARGE" : "标准 EXPLORE";
-        this.dom.driveMode.className = `val ${charging ? 'charge' : 'highlight'}`;
-    }
-
-    triggerSampleScan() {
-        if (!this.rover.scanTarget || this.rover.isScanning) return;
-
-        window.roverAudio.playScanSound();
-        this.rover.isScanning = true;
-        this.rover.scanProgress = 0;
-
-        const scanInterval = setInterval(() => {
-            this.rover.scanProgress += 12;
-            this.dom.scanProgressBar.style.width = `${this.rover.scanProgress}%`;
-
-            if (this.rover.scanTarget) {
-                this.world.triggerScanSparks(this.rover.scanTarget.mesh.position);
-            }
-
-            if (this.rover.scanProgress >= 100) {
-                clearInterval(scanInterval);
-                this.completeSampleCollection(this.rover.scanTarget);
-                this.rover.isScanning = false;
-                this.world.hideScanSparks();
-            }
-        }, 120);
-    }
-
-    completeSampleCollection(sample) {
-        if (!sample || sample.collected) return;
-        sample.collected = true;
-        sample.mesh.visible = false;
-        sample.beacon.visible = false;
-        if (sample.hologramRing) sample.hologramRing.visible = false;
-
-        this.collectedCount++;
-        this.discoveredSamples.add(sample.id);
-
-        this.dom.sampleCountBadge.textContent = `${this.collectedCount} / ${this.world.samples.length}`;
-        this.dom.modalSampleCount.textContent = this.collectedCount;
-
-        const card = document.createElement('div');
-        card.className = 'sample-card discovered';
-        card.innerHTML = `
-            <div class="type">${sample.type}</div>
-            <div class="name">${sample.name}</div>
-            <div class="desc">${sample.desc}</div>
-        `;
-        this.dom.samplesGrid.appendChild(card);
-        this.dom.scanPanel.classList.add('hidden');
-    }
-
-    updateBatteryAndPower(deltaTime) {
-        if (this.rover.isChargingMode) {
-            const stormPenalty = this.isSandstorm ? 0.35 : 1.0;
-            this.solarPower = 4.8 * stormPenalty;
-            this.battery = Math.min(100.0, this.battery + this.solarPower * deltaTime * 1.5);
-        } else {
-            this.solarPower = 0.0;
-            const drainRate = (Math.abs(this.rover.speed) > 0.5 ? 0.25 : 0.04) + (this.rover.headlightsOn ? 0.1 : 0);
-            this.battery = Math.max(0.0, this.battery - drainRate * deltaTime);
-        }
-
-        this.dom.batteryText.textContent = `${Math.round(this.battery)}%`;
-        this.dom.batteryBar.style.width = `${this.battery}%`;
-        this.dom.solarText.textContent = `${this.solarPower.toFixed(1)} kW/h`;
-        this.dom.solarBar.style.width = `${(this.solarPower / 6.0) * 100}%`;
-    }
-
-    updateSandstormSystem(deltaTime) {
-        this.sandstormTimer += deltaTime;
-        if (!this.isSandstorm && this.sandstormTimer > 120) {
-            this.isSandstorm = true;
-            this.sandstormTimer = 0;
-            this.world.setSandstorm(true);
-            this.dom.sandstormOverlay.classList.add('active');
-        } else if (this.isSandstorm && this.sandstormTimer > 35) {
-            this.isSandstorm = false;
-            this.sandstormTimer = 0;
-            this.world.setSandstorm(false);
-            this.dom.sandstormOverlay.classList.remove('active');
-        }
-    }
-
-    checkScanTarget() {
-        const roverPos = this.rover.position;
-        let nearestSample = null;
-        let minDist = Infinity;
-
-        this.world.samples.forEach(s => {
-            if (!s.collected) {
-                const dist = Math.hypot(roverPos.x - s.pos.x, roverPos.z - s.pos.z);
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearestSample = s;
-                }
-            }
-        });
-
-        if (nearestSample && minDist < 10.0) {
-            this.rover.scanTarget = nearestSample;
-            this.dom.scanPanel.classList.remove('hidden');
-            this.dom.targetName.textContent = nearestSample.name;
-            this.dom.targetDist.textContent = `距离: ${minDist.toFixed(1)} 米`;
-        } else {
-            this.rover.scanTarget = null;
-            this.dom.scanPanel.classList.add('hidden');
-            this.dom.scanProgressBar.style.width = '0%';
-            this.world.hideScanSparks();
+        if (this.dom.headlightStatus) {
+            this.dom.headlightStatus.textContent = state ? "开启 [L]" : "关闭 [L]";
+            this.dom.headlightStatus.className = `val ${state ? 'badge-on' : 'badge-off'}`;
         }
     }
 
@@ -427,8 +171,8 @@ class MarsGame {
         this.camera.fov += (targetFov - this.camera.fov) * 0.08;
 
         let shakeX = 0, shakeY = 0;
-        if (speedRatio > 0.6 || this.isSandstorm || this.rover.isDrifting) {
-            const intensity = (speedRatio > 0.6 ? 0.09 : 0) + (this.isSandstorm ? 0.12 : 0) + (this.rover.isDrifting ? 0.14 : 0);
+        if (speedRatio > 0.6 || this.rover.isDrifting) {
+            const intensity = (speedRatio > 0.6 ? 0.09 : 0) + (this.rover.isDrifting ? 0.14 : 0);
             shakeX = (Math.random() - 0.5) * intensity;
             shakeY = (Math.random() - 0.5) * intensity;
         }
@@ -463,58 +207,10 @@ class MarsGame {
         }
     }
 
-    renderRadar() {
-        const ctx = this.radarCtx;
-        const w = 160, h = 160;
-        ctx.clearRect(0, 0, w, h);
-
-        const center = w / 2;
-        const scale = 0.8;
-
-        const rPos = this.rover.position;
-
-        this.world.samples.forEach(s => {
-            if (!s.collected) {
-                const dx = (s.pos.x - rPos.x) * scale;
-                const dz = (s.pos.z - rPos.z) * scale;
-
-                const mapX = center + dx;
-                const mapY = center + dz;
-
-                if (Math.hypot(dx, dz) < center - 8) {
-                    ctx.beginPath();
-                    ctx.arc(mapX, mapY, 4, 0, Math.PI * 2);
-                    ctx.fillStyle = `#${s.color.toString(16).padStart(6, '0')}`;
-                    ctx.fill();
-                    ctx.shadowBlur = 8;
-                    ctx.shadowColor = '#ffd166';
-                }
-            }
-        });
-
-        ctx.save();
-        ctx.translate(center, center);
-        ctx.rotate(-this.rover.rotation);
-
-        ctx.beginPath();
-        ctx.moveTo(0, -7);
-        ctx.lineTo(-5, 6);
-        ctx.lineTo(5, 6);
-        ctx.closePath();
-
-        ctx.fillStyle = '#00e5ff';
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#00e5ff';
-        ctx.fill();
-        ctx.restore();
-    }
-
     updateTelemetryUI() {
         const currentSpeed = Math.abs(this.rover.speed);
-        this.dom.speedVal.textContent = currentSpeed.toFixed(1);
-        this.dom.pitchVal.textContent = `${(this.rover.pitch * (180 / Math.PI)).toFixed(1)}°`;
-        this.dom.rollVal.textContent = `${(this.rover.roll * (180 / Math.PI)).toFixed(1)}°`;
-        this.dom.navCoords.textContent = `X: ${Math.round(this.rover.position.x)} | Z: ${Math.round(this.rover.position.z)}`;
+        if (this.dom.speedVal) this.dom.speedVal.textContent = currentSpeed.toFixed(1);
+        if (this.dom.navCoords) this.dom.navCoords.textContent = `X: ${Math.round(this.rover.position.x)} | Z: ${Math.round(this.rover.position.z)}`;
 
         // Dynamic HUD Auto-Fade when driving
         if (currentSpeed > 2.0) {
@@ -547,15 +243,9 @@ class MarsGame {
             this.world.triggerWheelDust(this.rover.position, this.rover.speed, this.rover.isDrifting);
         }
 
-        this.updateBatteryAndPower(deltaTime);
-        this.updateSandstormSystem(deltaTime);
-        this.checkScanTarget();
-        this.update3DTargetHUD();
-
         window.roverAudio.updateEngineSound(this.rover.speed, this.inputs.forward || this.inputs.backward);
 
         this.updateCamera();
-        this.renderRadar();
         this.updateTelemetryUI();
 
         if (this.composer) {

@@ -1,5 +1,5 @@
 /**
- * Mars World Generator: Infinite Procedural Terrain, Dynamic Sky, Volumetric Weather & Particle Systems
+ * Mars World Generator: Pure Infinite Procedural Terrain, Dynamic Sky, Volumetric Weather & Particle Systems
  * Implements Chunkless Grid-Shifting Infinite Terrain, Deterministic Object Pooling, and 2D Perlin-Noise Mars Dunes
  */
 class MarsWorld {
@@ -13,12 +13,10 @@ class MarsWorld {
 
         this.dustParticles = null;
         this.sandstormActive = false;
-        this.samples = [];
 
         // Visual enhancement systems
         this.wheelDustSystem = null;
         this.wheelDustPositions = [];
-        this.sparkParticles = null;
         this.atmosphereDome = null;
         this.dayTime = 0.25; // 0 to 1 cycle
         this.sunLight = null;
@@ -39,8 +37,6 @@ class MarsWorld {
         this.initRockPool();
         this.initDustParticles();
         this.initWheelDustSystem();
-        this.initSparkParticleSystem();
-        this.spawnScientificSamples();
     }
 
     // Canvas 2D soft particle texture for volumetric smoke/dust
@@ -130,7 +126,7 @@ class MarsWorld {
         // Micro ripples
         h += Math.sin(x * 0.2) * Math.cos(z * 0.2) * 0.12;
 
-        // Periodic large crater dishes spaced every ~250m
+        // Periodic crater dishes spaced every ~240m
         const craterGridSize = 240;
         const cx = Math.floor((x + craterGridSize / 2) / craterGridSize) * craterGridSize;
         const cz = Math.floor((z + craterGridSize / 2) / craterGridSize) * craterGridSize;
@@ -138,16 +134,15 @@ class MarsWorld {
 
         if (cDist < 35) {
             const craterDepth = (1 - (cDist / 35));
-            h -= craterDepth * craterDepth * 4.2; // Dish cavity
+            h -= craterDepth * craterDepth * 4.2;
             if (cDist > 25) {
-                h += (1 - (cDist - 25) / 10) * 1.2; // Crater rim lip
+                h += (1 - (cDist - 25) / 10) * 1.2;
             }
         }
 
         return h;
     }
 
-    // Pseudo-random deterministic spatial hash for infinite rock placement
     spatialHash(cellX, cellZ) {
         let n = cellX * 73856093 ^ cellZ * 19349663;
         n = (n << 13) ^ n;
@@ -243,7 +238,6 @@ class MarsWorld {
 
             posAttr.setY(i, worldY);
 
-            // Soil color gradient based on elevation & noise
             const noiseFactor = (Math.sin(worldX * 0.08) + Math.cos(worldZ * 0.08)) * 0.05;
             const c = new THREE.Color();
             if (worldY > 3) {
@@ -276,7 +270,6 @@ class MarsWorld {
             this.rebuildTerrainVertices(this.gridCenterX, this.gridCenterZ);
         }
 
-        // Keep Atmosphere Dome centered on Rover
         if (this.atmosphereDome) {
             this.atmosphereDome.position.set(roverPos.x, 0, roverPos.z);
         }
@@ -300,7 +293,7 @@ class MarsWorld {
 
     updateInfiniteRocks(roverPos) {
         const cellSize = 18;
-        const radiusCells = 8; // ~144m view radius
+        const radiusCells = 8;
         const rCellX = Math.floor(roverPos.x / cellSize);
         const rCellZ = Math.floor(roverPos.z / cellSize);
 
@@ -309,7 +302,7 @@ class MarsWorld {
         for (let cx = rCellX - radiusCells; cx <= rCellX + radiusCells; cx++) {
             for (let cz = rCellZ - radiusCells; cz <= rCellZ + radiusCells; cz++) {
                 const val = this.spatialHash(cx, cz);
-                if (val > 0.68) { // 32% chance of rock in this cell
+                if (val > 0.68) {
                     if (rockIdx >= this.maxRocks) break;
 
                     const rock = this.rockPool[rockIdx];
@@ -330,7 +323,6 @@ class MarsWorld {
             }
         }
 
-        // Hide remaining unused rocks in pool
         for (let i = rockIdx; i < this.maxRocks; i++) {
             this.rockPool[i].visible = false;
         }
@@ -388,27 +380,6 @@ class MarsWorld {
         }
     }
 
-    initSparkParticleSystem() {
-        const sparkCount = 60;
-        const geo = new THREE.BufferGeometry();
-        const positions = new Float32Array(sparkCount * 3);
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-        const pMat = new THREE.PointsMaterial({
-            color: 0x00e5ff,
-            size: 0.8,
-            map: this.softParticleTexture,
-            transparent: true,
-            opacity: 0.95,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending
-        });
-
-        this.sparkParticles = new THREE.Points(geo, pMat);
-        this.sparkParticles.visible = false;
-        this.scene.add(this.sparkParticles);
-    }
-
     triggerWheelDust(roverPos, speed, isDrifting = false) {
         if (Math.abs(speed) < 0.8) return;
 
@@ -425,86 +396,6 @@ class MarsWorld {
                 life: isDrifting ? 1.4 : 1.0
             };
         }
-    }
-
-    triggerScanSparks(targetPos) {
-        if (!this.sparkParticles) return;
-        this.sparkParticles.visible = true;
-        const posAttr = this.sparkParticles.geometry.attributes.position;
-
-        for (let i = 0; i < posAttr.count; i++) {
-            posAttr.setXYZ(
-                i,
-                targetPos.x + (Math.random() - 0.5) * 2.2,
-                targetPos.y + Math.random() * 1.6,
-                targetPos.z + (Math.random() - 0.5) * 2.2
-            );
-        }
-        posAttr.needsUpdate = true;
-    }
-
-    hideScanSparks() {
-        if (this.sparkParticles) this.sparkParticles.visible = false;
-    }
-
-    spawnScientificSamples() {
-        const sampleDefinitions = [
-            { id: 1, name: "橄榄石深层岩样", type: "火成岩矿物", color: 0x30d158, desc: "形成于深层地幔的富镁橄榄石，保留了火星早期热演化的关键化石信息。", pos: { x: 35, z: -40 } },
-            { id: 2, name: "耶泽罗三角洲绿泥石", type: "古湖泊沉积", color: 0x00e5ff, desc: "形成于 37 亿年前古河流结晶的水合硅酸盐黏土，极具古生命沉积印记。", pos: { x: -65, z: 50 } },
-            { id: 3, name: "深层水冰地下核心", type: "冰晶遗迹", color: 0x60a5fa, desc: "冻结于地表以下 1.5 米处的纯净高浓度水冰晶体，含微量溶解气泡。", pos: { x: 70, z: 85 } },
-            { id: 4, name: "强磁赤铁矿异常", type: "强磁矿物", color: 0xff3b30, desc: "呈高度各向异性磁化的赤铁矿结晶，记录了古火星磁场的倒转事件。", pos: { x: -90, z: -80 } },
-            { id: 5, name: "赤铁矿蓝莓结核", type: "球状沉积", color: 0xa855f7, desc: "著名的“蓝莓”球粒状赤铁矿，由地下水渗透沉淀缓慢生长而成。", pos: { x: 110, z: -60 } },
-            { id: 6, name: "陨石撞击熔融玻璃", type: "高压熔岩", color: 0xf59e0b, desc: "极高温度陨石撞击产生的淬火二氧化硅玻璃，封装有撞击瞬间的大气微粒。", pos: { x: -120, z: 30 } },
-            { id: 7, name: "古叠层石生物基质", type: "有机遗迹", color: 0xfacc15, desc: "具有层状结构的碳酸盐微沉淀物，与地球最古老蓝藻叠层石形态高度吻合！", pos: { x: 45, z: 120 } },
-            { id: 8, name: "奇异火星晶体巨石", type: "未知异象", color: 0xec4899, desc: "发射未知微弱电磁脉冲的规则棱柱晶体，成分无法用传统矿物学完全解释。", pos: { x: -30, z: -130 } }
-        ];
-
-        sampleDefinitions.forEach(def => {
-            const y = this.getTerrainHeight(def.pos.x, def.pos.z);
-            
-            const sGeo = new THREE.OctahedronGeometry(0.9, 1);
-            const sMat = new THREE.MeshStandardMaterial({
-                color: def.color,
-                emissive: def.color,
-                emissiveIntensity: 1.0,
-                roughness: 0.1,
-                metalness: 0.95
-            });
-
-            const sampleMesh = new THREE.Mesh(sGeo, sMat);
-            sampleMesh.position.set(def.pos.x, y + 1.3, def.pos.z);
-            this.scene.add(sampleMesh);
-
-            const beaconGeo = new THREE.CylinderGeometry(0.12, 0.12, 18, 8);
-            beaconGeo.translate(0, 9, 0);
-            const beaconMat = new THREE.MeshBasicMaterial({ color: def.color, transparent: true, opacity: 0.45 });
-            const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
-            beaconMesh.position.set(def.pos.x, y, def.pos.z);
-            this.scene.add(beaconMesh);
-
-            const ringGeo = new THREE.RingGeometry(1.2, 1.5, 32);
-            ringGeo.rotateX(-Math.PI / 2);
-            const ringMat = new THREE.MeshBasicMaterial({ color: def.color, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
-            const hologramRing = new THREE.Mesh(ringGeo, ringMat);
-            hologramRing.position.set(def.pos.x, y + 0.05, def.pos.z);
-            this.scene.add(hologramRing);
-
-            this.samples.push({
-                ...def,
-                y: y,
-                mesh: sampleMesh,
-                beacon: beaconMesh,
-                hologramRing: hologramRing,
-                collected: false
-            });
-        });
-    }
-
-    setSandstorm(active) {
-        this.sandstormActive = active;
-        const fogDensity = active ? 0.035 : 0.006;
-        this.scene.fog.density = fogDensity;
-        window.roverAudio.setSandstormWind(active);
     }
 
     updateDayNightCycle(deltaTime) {
@@ -541,19 +432,6 @@ class MarsWorld {
             this.updateInfiniteRocks(roverPos);
         }
 
-        // Animate sample markers & hologram ring pulse
-        this.samples.forEach(s => {
-            if (!s.collected) {
-                s.mesh.rotation.y += deltaTime * 1.5;
-                s.mesh.position.y = s.y + 1.3 + Math.sin(Date.now() * 0.003 + s.id) * 0.25;
-                if (s.hologramRing) {
-                    s.hologramRing.rotation.z += deltaTime * 0.8;
-                    const scale = 1.0 + Math.sin(Date.now() * 0.004 + s.id) * 0.15;
-                    s.hologramRing.scale.set(scale, scale, scale);
-                }
-            }
-        });
-
         // Update wheel dust particle animation
         if (this.wheelDustSystem) {
             const posAttr = this.wheelDustSystem.geometry.attributes.position;
@@ -574,14 +452,13 @@ class MarsWorld {
         // Drift ambient dust particles relative to Rover
         if (this.dustParticles && roverPos) {
             const posAttr = this.dustParticles.geometry.attributes.position;
-            const windSpeed = this.sandstormActive ? 35 : 8;
+            const windSpeed = 8;
 
             for (let i = 0; i < posAttr.count; i++) {
                 let x = posAttr.getX(i) + windSpeed * deltaTime;
-                let y = posAttr.getY(i) - (this.sandstormActive ? 2.8 : 0.5) * deltaTime;
+                let y = posAttr.getY(i) - 0.5 * deltaTime;
                 let z = posAttr.getZ(i) + (windSpeed * 0.3) * deltaTime;
 
-                // Keep particles inside bounding box around Rover
                 if (Math.abs(x - roverPos.x) > 160) x = roverPos.x - 160;
                 if (y < 0) y = 35;
                 if (Math.abs(z - roverPos.z) > 160) z = roverPos.z - 160;
