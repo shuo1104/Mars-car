@@ -1,27 +1,38 @@
 /**
- * Mars World Generator: Procedural Terrain, Sky, Lighting, Weather, and Sample Waypoints
+ * Mars World Generator: Procedural Terrain, Sky, Lighting, Weather, Wheel Tracks, and Sample Waypoints
  */
 class MarsWorld {
     constructor(scene) {
         this.scene = scene;
         this.terrainMesh = null;
         this.terrainSize = 400; // 400m x 400m map size
-        this.segments = 120;
+        this.segments = 140;
         this.dustParticles = null;
         this.sandstormActive = false;
         this.samples = [];
+
+        // Visual enhancement systems
+        this.wheelDustSystem = null;
+        this.wheelDustPositions = [];
+        this.wheelTracksMesh = null;
+        this.trackPoints = [];
+        this.dayTime = 0.25; // 0 to 1 cycle
+        this.sunLight = null;
+        this.ambientLight = null;
+        this.sparkParticles = null;
 
         this.initLightingAndFog();
         this.initSkyAndMoons();
         this.generateTerrain();
         this.scatterBouldersAndCraters();
         this.initDustParticles();
+        this.initWheelDustSystem();
+        this.initSparkParticleSystem();
         this.spawnScientificSamples();
     }
 
     // Procedural height function for Mars craters and rolling dunes
     getTerrainHeight(x, z) {
-        // Multi-frequency trigonometric noise simulating craters & ridges
         const d = Math.sqrt(x * x + z * z);
         let h = Math.sin(x * 0.02) * Math.cos(z * 0.02) * 3.5;
         h += Math.sin(x * 0.06 + 1.2) * Math.sin(z * 0.06) * 1.2;
@@ -48,27 +59,26 @@ class MarsWorld {
         this.scene.background = fogColor;
 
         // Ambient Sun & Sky Light
-        const ambientLight = new THREE.AmbientLight(0xffaa88, 0.65);
-        this.scene.add(ambientLight);
+        this.ambientLight = new THREE.AmbientLight(0xffaa88, 0.65);
+        this.scene.add(this.ambientLight);
 
-        // Directional Sun Light (Low angle sun casting long dramatic shadows)
-        const sunLight = new THREE.DirectionalLight(0xffddaa, 1.3);
-        sunLight.position.set(100, 70, -100);
-        sunLight.castShadow = true;
-        sunLight.shadow.mapSize.width = 2048;
-        sunLight.shadow.mapSize.height = 2048;
-        sunLight.shadow.camera.near = 10;
-        sunLight.shadow.camera.far = 350;
+        // Directional Sun Light
+        this.sunLight = new THREE.DirectionalLight(0xffddaa, 1.4);
+        this.sunLight.position.set(100, 70, -100);
+        this.sunLight.castShadow = true;
+        this.sunLight.shadow.mapSize.width = 2048;
+        this.sunLight.shadow.mapSize.height = 2048;
+        this.sunLight.shadow.camera.near = 10;
+        this.sunLight.shadow.camera.far = 350;
         const d = 150;
-        sunLight.shadow.camera.left = -d;
-        sunLight.shadow.camera.right = d;
-        sunLight.shadow.camera.top = d;
-        sunLight.shadow.camera.bottom = -d;
-        this.scene.add(sunLight);
+        this.sunLight.shadow.camera.left = -d;
+        this.sunLight.shadow.camera.right = d;
+        this.sunLight.shadow.camera.top = d;
+        this.sunLight.shadow.camera.bottom = -d;
+        this.scene.add(this.sunLight);
     }
 
     initSkyAndMoons() {
-        // Celestial Moons: Phobos & Deimos
         const moonMat = new THREE.MeshBasicMaterial({ color: 0xe2e8f0 });
         
         const phobos = new THREE.Mesh(new THREE.DodecahedronGeometry(2, 1), moonMat);
@@ -87,21 +97,27 @@ class MarsWorld {
         const posAttr = geo.attributes.position;
         const colors = [];
 
-        // Apply procedural height map & color variation
+        // Generate procedural noise texture variation
         for (let i = 0; i < posAttr.count; i++) {
             const x = posAttr.getX(i);
             const z = posAttr.getZ(i);
             const y = this.getTerrainHeight(x, z);
             posAttr.setY(i, y);
 
-            // Red-orange Mars soil gradient based on elevation
+            // Add fine surface micro-roughness
+            const microNoise = Math.sin(x * 1.5) * Math.cos(z * 1.5) * 0.08;
+            posAttr.setY(i, y + microNoise);
+
+            // Red-orange Mars soil gradient based on elevation & slope
             const c = new THREE.Color();
+            const noiseFactor = (Math.sin(x * 0.1) + Math.cos(z * 0.1)) * 0.05;
+
             if (y > 3) {
-                c.setHSL(0.04, 0.65, 0.35 + (y * 0.02)); // Higher dark rocks
+                c.setHSL(0.04, 0.65, 0.32 + noiseFactor); // High dark rocky ground
             } else if (y < -1) {
-                c.setHSL(0.06, 0.75, 0.42); // Dust crater basin
+                c.setHSL(0.06, 0.80, 0.45 + noiseFactor); // Basin reddish dust
             } else {
-                c.setHSL(0.05, 0.70, 0.38); // Standard rust dust
+                c.setHSL(0.05, 0.72, 0.38 + noiseFactor); // Standard rust soil
             }
             colors.push(c.r, c.g, c.b);
         }
@@ -111,8 +127,9 @@ class MarsWorld {
 
         const terrainMat = new THREE.MeshStandardMaterial({
             vertexColors: true,
-            roughness: 0.85,
-            metalness: 0.15
+            roughness: 0.88,
+            metalness: 0.12,
+            flatShading: false
         });
 
         this.terrainMesh = new THREE.Mesh(geo, terrainMat);
@@ -128,9 +145,8 @@ class MarsWorld {
             metalness: 0.1
         });
 
-        const numBoulders = 180;
+        const numBoulders = 200;
         for (let i = 0; i < numBoulders; i++) {
-            // Random scatter, keep clear of immediate starting spawn (radius 12m)
             const angle = Math.random() * Math.PI * 2;
             const dist = 14 + Math.random() * 160;
             const x = Math.sin(angle) * dist;
@@ -138,7 +154,7 @@ class MarsWorld {
             const y = this.getTerrainHeight(x, z);
 
             const rock = new THREE.Mesh(rockGeo, rockMat);
-            const scale = 0.5 + Math.random() * 2.2;
+            const scale = 0.5 + Math.random() * 2.5;
             rock.scale.set(scale, scale * (0.6 + Math.random() * 0.6), scale);
             rock.position.set(x, y + scale * 0.4, z);
             rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
@@ -149,27 +165,107 @@ class MarsWorld {
     }
 
     initDustParticles() {
-        const particleCount = 600;
+        const particleCount = 700;
         const geo = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
 
         for (let i = 0; i < particleCount * 3; i += 3) {
-            positions[i]     = (Math.random() - 0.5) * 300;
-            positions[i + 1] = Math.random() * 30;
-            positions[i + 2] = (Math.random() - 0.5) * 300;
+            positions[i]     = (Math.random() - 0.5) * 320;
+            positions[i + 1] = Math.random() * 35;
+            positions[i + 2] = (Math.random() - 0.5) * 320;
         }
 
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
         const pMat = new THREE.PointsMaterial({
             color: 0xff7744,
-            size: 0.8,
+            size: 0.9,
             transparent: true,
             opacity: 0.45
         });
 
         this.dustParticles = new THREE.Points(geo, pMat);
         this.scene.add(this.dustParticles);
+    }
+
+    initWheelDustSystem() {
+        const maxDust = 80;
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(maxDust * 3);
+        const opacities = new Float32Array(maxDust);
+
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
+        const pMat = new THREE.PointsMaterial({
+            color: 0xe65c00,
+            size: 1.4,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        this.wheelDustSystem = new THREE.Points(geo, pMat);
+        this.scene.add(this.wheelDustSystem);
+
+        for (let i = 0; i < maxDust; i++) {
+            this.wheelDustPositions.push({ x: 0, y: -100, z: 0, life: 0 });
+        }
+    }
+
+    initSparkParticleSystem() {
+        const sparkCount = 40;
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(sparkCount * 3);
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const pMat = new THREE.PointsMaterial({
+            color: 0x00e5ff,
+            size: 0.5,
+            transparent: true,
+            opacity: 0.9
+        });
+
+        this.sparkParticles = new THREE.Points(geo, pMat);
+        this.sparkParticles.visible = false;
+        this.scene.add(this.sparkParticles);
+    }
+
+    triggerWheelDust(roverPos, speed) {
+        if (Math.abs(speed) < 1.0) return;
+
+        // Emit dust particles behind rear wheels
+        const freeIndex = this.wheelDustPositions.findIndex(p => p.life <= 0);
+        if (freeIndex !== -1) {
+            this.wheelDustPositions[freeIndex] = {
+                x: roverPos.x + (Math.random() - 0.5) * 1.5,
+                y: roverPos.y + 0.2,
+                z: roverPos.z + (Math.random() - 0.5) * 1.5,
+                vx: (Math.random() - 0.5) * 0.8,
+                vy: 0.6 + Math.random() * 0.8,
+                vz: (Math.random() - 0.5) * 0.8,
+                life: 1.0
+            };
+        }
+    }
+
+    triggerScanSparks(targetPos) {
+        if (!this.sparkParticles) return;
+        this.sparkParticles.visible = true;
+        const posAttr = this.sparkParticles.geometry.attributes.position;
+
+        for (let i = 0; i < posAttr.count; i++) {
+            posAttr.setXYZ(
+                i,
+                targetPos.x + (Math.random() - 0.5) * 1.8,
+                targetPos.y + Math.random() * 1.2,
+                targetPos.z + (Math.random() - 0.5) * 1.8
+            );
+        }
+        posAttr.needsUpdate = true;
+    }
+
+    hideScanSparks() {
+        if (this.sparkParticles) this.sparkParticles.visible = false;
     }
 
     spawnScientificSamples() {
@@ -187,27 +283,26 @@ class MarsWorld {
         sampleDefinitions.forEach(def => {
             const y = this.getTerrainHeight(def.pos.x, def.pos.z);
             
-            // Glowing Sample Mesh
             const sGeo = new THREE.OctahedronGeometry(0.8, 0);
             const sMat = new THREE.MeshStandardMaterial({
                 color: def.color,
                 emissive: def.color,
-                emissiveIntensity: 0.8,
-                roughness: 0.2,
-                metalness: 0.9
+                emissiveIntensity: 0.85,
+                roughness: 0.15,
+                metalness: 0.95
             });
 
             const sampleMesh = new THREE.Mesh(sGeo, sMat);
             sampleMesh.position.set(def.pos.x, y + 1.2, def.pos.z);
             this.scene.add(sampleMesh);
 
-            // Vertical Beacon Light Pillar
-            const beaconGeo = new THREE.CylinderGeometry(0.1, 0.1, 15, 8);
-            beaconGeo.translate(0, 7.5, 0);
+            // Vertical Beacon Light Pillar with dynamic glow
+            const beaconGeo = new THREE.CylinderGeometry(0.12, 0.12, 18, 8);
+            beaconGeo.translate(0, 9, 0);
             const beaconMat = new THREE.MeshBasicMaterial({
                 color: def.color,
                 transparent: true,
-                opacity: 0.35
+                opacity: 0.4
             });
             const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
             beaconMesh.position.set(def.pos.x, y, def.pos.z);
@@ -230,28 +325,76 @@ class MarsWorld {
         window.roverAudio.setSandstormWind(active);
     }
 
+    updateDayNightCycle(deltaTime) {
+        // Slow Day-Night cycle progression
+        this.dayTime = (this.dayTime + deltaTime * 0.005) % 1.0;
+        const sunAngle = this.dayTime * Math.PI * 2;
+
+        const sunX = Math.cos(sunAngle) * 120;
+        const sunY = Math.sin(sunAngle) * 90;
+        const sunZ = Math.sin(sunAngle * 0.5) * 100;
+
+        if (this.sunLight) {
+            this.sunLight.position.set(sunX, Math.max(10, sunY), sunZ);
+            
+            // Adjust light tint from bright day to dusk/night
+            if (sunY < 20) {
+                // Dusk / Night atmosphere
+                this.scene.fog.color.setHSL(0.02, 0.75, 0.12);
+                this.scene.background.setHSL(0.02, 0.75, 0.12);
+                this.sunLight.color.setHSL(0.05, 0.9, 0.4);
+                this.ambientLight.intensity = 0.25;
+            } else {
+                // Daytime
+                this.scene.fog.color.setHSL(0.05, 0.7, 0.42);
+                this.scene.background.setHSL(0.05, 0.7, 0.42);
+                this.sunLight.color.setHSL(0.08, 0.8, 0.65);
+                this.ambientLight.intensity = 0.65;
+            }
+        }
+    }
+
     update(deltaTime) {
+        this.updateDayNightCycle(deltaTime);
+
         // Animate floating and spinning sample markers
         this.samples.forEach(s => {
             if (!s.collected) {
                 s.mesh.rotation.y += deltaTime * 1.5;
-                s.mesh.position.y = s.y + 1.2 + Math.sin(Date.now() * 0.003 + s.id) * 0.2;
+                s.mesh.position.y = s.y + 1.2 + Math.sin(Date.now() * 0.003 + s.id) * 0.25;
             }
         });
+
+        // Update wheel dust particle animation
+        if (this.wheelDustSystem) {
+            const posAttr = this.wheelDustSystem.geometry.attributes.position;
+            this.wheelDustPositions.forEach((p, idx) => {
+                if (p.life > 0) {
+                    p.x += p.vx * deltaTime;
+                    p.y += p.vy * deltaTime;
+                    p.z += p.vz * deltaTime;
+                    p.life -= deltaTime * 1.2;
+                    posAttr.setXYZ(idx, p.x, p.y, p.z);
+                } else {
+                    posAttr.setXYZ(idx, 0, -100, 0);
+                }
+            });
+            posAttr.needsUpdate = true;
+        }
 
         // Drift ambient dust particles with Mars wind
         if (this.dustParticles) {
             const posAttr = this.dustParticles.geometry.attributes.position;
-            const windSpeed = this.sandstormActive ? 30 : 6;
+            const windSpeed = this.sandstormActive ? 32 : 7;
 
             for (let i = 0; i < posAttr.count; i++) {
                 let x = posAttr.getX(i) + windSpeed * deltaTime;
-                let y = posAttr.getY(i) - (this.sandstormActive ? 2 : 0.5) * deltaTime;
+                let y = posAttr.getY(i) - (this.sandstormActive ? 2.5 : 0.4) * deltaTime;
                 let z = posAttr.getZ(i) + (windSpeed * 0.3) * deltaTime;
 
-                if (x > 150) x = -150;
-                if (y < 0) y = 30;
-                if (z > 150) z = -150;
+                if (x > 160) x = -160;
+                if (y < 0) y = 35;
+                if (z > 160) z = -160;
 
                 posAttr.setXYZ(i, x, y, z);
             }

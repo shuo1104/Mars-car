@@ -222,10 +222,16 @@ class MarsGame {
         const interval = setInterval(() => {
             progress += 20;
             this.dom.scanProgressBar.style.width = `${progress}%`;
+            
+            // Trigger laser sparks particle effect at target rock position
+            if (this.rover.scanTarget) {
+                this.world.triggerScanSparks(this.rover.scanTarget.mesh.position);
+            }
 
             if (progress >= 100) {
                 clearInterval(interval);
                 this.rover.isScanning = false;
+                this.world.hideScanSparks();
                 this.collectSample(this.rover.scanTarget);
             }
         }, 120);
@@ -279,18 +285,15 @@ class MarsGame {
 
     updateBatteryAndPower(deltaTime) {
         if (this.rover.isChargingMode) {
-            // Solar Charge efficiency (less efficiently during sandstorm)
             const efficiency = this.isSandstorm ? 2.5 : 6.0;
             this.solarPower = efficiency;
             this.battery = Math.min(100.0, this.battery + efficiency * deltaTime);
         } else {
-            this.solarPower = 0.2; // Trickle power from RTG
-            // Driving drains battery proportional to speed
+            this.solarPower = 0.2;
             const driveDrain = 0.2 + (Math.abs(this.rover.speed) / this.rover.maxSpeed) * 0.8;
             this.battery = Math.max(0.0, this.battery - driveDrain * deltaTime);
         }
 
-        // Update DOM status bars
         this.dom.batteryText.textContent = `${Math.round(this.battery)}%`;
         this.dom.batteryBar.style.width = `${this.battery}%`;
 
@@ -300,7 +303,6 @@ class MarsGame {
 
     updateSandstormSystem(deltaTime) {
         this.sandstormTimer += deltaTime;
-        // Trigger sandstorm roughly every 100 seconds for 20s
         if (!this.isSandstorm && this.sandstormTimer > 90) {
             this.isSandstorm = true;
             this.sandstormTimer = 0;
@@ -331,7 +333,6 @@ class MarsGame {
             }
         });
 
-        // Nearby scan radius = 10 meters
         if (nearestSample && minDist < 10.0) {
             this.rover.scanTarget = nearestSample;
             this.dom.scanPanel.classList.remove('hidden');
@@ -341,6 +342,7 @@ class MarsGame {
             this.rover.scanTarget = null;
             this.dom.scanPanel.classList.add('hidden');
             this.dom.scanProgressBar.style.width = '0%';
+            this.world.hideScanSparks();
         }
     }
 
@@ -349,7 +351,6 @@ class MarsGame {
         const rRot = this.rover.rotation;
 
         if (this.cameraMode === 0) {
-            // Mode 0: Smooth Chase Cam
             const offset = new THREE.Vector3(
                 Math.sin(rRot) * 8.5,
                 3.8,
@@ -359,7 +360,6 @@ class MarsGame {
             this.camera.position.lerp(targetCamPos, 0.1);
             this.camera.lookAt(rPos.clone().add(new THREE.Vector3(0, 1.2, 0)));
         } else if (this.cameraMode === 1) {
-            // Mode 1: Mastcam First-Person POV
             const povPos = rPos.clone().add(new THREE.Vector3(
                 -Math.sin(rRot) * 0.7,
                 2.3,
@@ -373,7 +373,6 @@ class MarsGame {
             ));
             this.camera.lookAt(lookTarget);
         } else if (this.cameraMode === 2) {
-            // Mode 2: Satellite High Top-Down View
             this.camera.position.set(rPos.x, rPos.y + 45, rPos.z + 20);
             this.camera.lookAt(rPos);
         }
@@ -385,11 +384,10 @@ class MarsGame {
         ctx.clearRect(0, 0, w, h);
 
         const center = w / 2;
-        const scale = 0.8; // Radar zoom factor
+        const scale = 0.8;
 
         const rPos = this.rover.position;
 
-        // Draw Waypoint dots
         this.world.samples.forEach(s => {
             if (!s.collected) {
                 const dx = (s.pos.x - rPos.x) * scale;
@@ -398,7 +396,6 @@ class MarsGame {
                 const mapX = center + dx;
                 const mapY = center + dz;
 
-                // Render inside radar circle bounds
                 if (Math.hypot(dx, dz) < center - 8) {
                     ctx.beginPath();
                     ctx.arc(mapX, mapY, 4, 0, Math.PI * 2);
@@ -410,7 +407,6 @@ class MarsGame {
             }
         });
 
-        // Draw Rover Position & Heading Triangle in Center
         ctx.save();
         ctx.translate(center, center);
         ctx.rotate(-this.rover.rotation);
@@ -449,6 +445,11 @@ class MarsGame {
 
         this.rover.update(deltaTime, this.inputs, (x, z) => this.world.getTerrainHeight(x, z));
         this.world.update(deltaTime);
+
+        // Emit wheel dust particles when driving
+        if (Math.abs(this.rover.speed) > 1.2) {
+            this.world.triggerWheelDust(this.rover.position, this.rover.speed);
+        }
 
         this.updateBatteryAndPower(deltaTime);
         this.updateSandstormSystem(deltaTime);
