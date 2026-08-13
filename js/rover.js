@@ -1,7 +1,7 @@
 /**
- * Wanderer-1 Mars Rover 3D Model & Physics System
+ * Wanderer-1 Mars Rover 3D Model & Driving Physics System
  * Built programmatically with Three.js primitives
- * Enhanced with Dynamic Suspension Physics, Rocker-Bogie Mechanics, and Laser Target Aiming
+ * Features Dynamic Suspension Spring Physics, Sand Drift / Skid Mechanics, and Ackermann Steering
  */
 class MarsRover {
     constructor(scene) {
@@ -15,13 +15,18 @@ class MarsRover {
         this.lastSpeed = 0;
         this.accelerationVal = 0;
         this.steeringAngle = 0;
-        this.maxSpeed = 14.0; // km/h scaled
-        this.reverseMaxSpeed = -6.0;
-        this.acceleration = 15.0;
-        this.friction = 8.0;
-        this.turnSpeed = 1.8;
+        this.maxSpeed = 16.0; // km/h scaled for responsive driving
+        this.reverseMaxSpeed = -7.0;
+        this.acceleration = 16.0;
+        this.friction = 7.0;
+        this.turnSpeed = 1.95;
+
+        // Sand Skid & Drift Mechanics
+        this.isDrifting = false;
+        this.slideVelocity = new THREE.Vector2(0, 0);
+        this.driftFactor = 0;
         
-        // Dynamic Suspension & Juice Variables
+        // Dynamic Suspension Springs & Juice Variables
         this.pitch = 0;
         this.roll = 0;
         this.suspensionPitch = 0;
@@ -33,7 +38,7 @@ class MarsRover {
         this.wheels = [];
         this.steeredWheelGroups = [];
         this.solarPanels = [];
-        this.solarFoldAngle = 0; // 0 = folded, 1 = open
+        this.solarFoldAngle = 0;
         this.isChargingMode = false;
         this.headlightsOn = false;
         this.headlights = [];
@@ -101,7 +106,7 @@ class MarsRover {
         // 2. Solar Panel Arrays (Left & Right Wings)
         const panelShapeGeo = new THREE.BoxGeometry(1.2, 0.05, 1.8);
         
-        // Left Solar Panel Group (hinged at chassis edge)
+        // Left Solar Panel Group
         this.leftSolarPivot = new THREE.Group();
         this.leftSolarPivot.position.set(-0.8, 1.35, 0);
         const leftPanel = new THREE.Mesh(panelShapeGeo, solarMat);
@@ -121,7 +126,7 @@ class MarsRover {
         this.mesh.add(this.rightSolarPivot);
         this.solarPanels.push(this.rightSolarPivot);
 
-        // 3. Camera Mast Tower (Mastcam-Z & SuperCam Laser)
+        // 3. Camera Mast Tower
         const mastGroup = new THREE.Group();
         mastGroup.position.set(0.4, 1.3, -0.7);
 
@@ -135,7 +140,7 @@ class MarsRover {
         this.camHead = new THREE.Mesh(camHeadGeo, metalBodyMat);
         this.camHead.position.y = 1.2;
         
-        // Dual Stereo Lenses
+        // Lenses
         const lensGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.1, 12);
         lensGeo.rotateX(Math.PI / 2);
         const leftLens = new THREE.Mesh(lensGeo, lensMat);
@@ -145,7 +150,7 @@ class MarsRover {
         this.camHead.add(leftLens);
         this.camHead.add(rightLens);
 
-        // Laser Scan Aperture in Center
+        // Laser Scan Aperture
         const laserApertureGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.08, 12);
         laserApertureGeo.rotateX(Math.PI / 2);
         const laserAperture = new THREE.Mesh(laserApertureGeo, new THREE.MeshBasicMaterial({ color: 0xff0055 }));
@@ -155,10 +160,10 @@ class MarsRover {
         mastGroup.add(this.camHead);
         this.mesh.add(mastGroup);
 
-        // 4. Laser Beam Particle Effect Mesh (Hidden by default)
+        // 4. Laser Beam Mesh
         const laserBeamGeo = new THREE.CylinderGeometry(0.03, 0.18, 12, 8);
         laserBeamGeo.rotateX(Math.PI / 2);
-        laserBeamGeo.translate(0, 0, -6); // Beam points forward
+        laserBeamGeo.translate(0, 0, -6);
         this.laserMesh = new THREE.Mesh(laserBeamGeo, new THREE.MeshBasicMaterial({
             color: 0x00e5ff,
             transparent: true,
@@ -168,7 +173,7 @@ class MarsRover {
         this.laserMesh.visible = false;
         this.mesh.add(this.laserMesh);
 
-        // 5. LED Headlights (Dual forward spotlights)
+        // 5. LED Headlights
         const lightGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.1, 12);
         lightGeo.rotateX(Math.PI / 2);
         
@@ -177,7 +182,7 @@ class MarsRover {
             hMesh.position.set(x, 0.7, -1.12);
             this.mesh.add(hMesh);
 
-            const spotLight = new THREE.SpotLight(0xffffff, 0); // Start off
+            const spotLight = new THREE.SpotLight(0xffffff, 0);
             spotLight.position.set(x, 0.7, -1.15);
             spotLight.target.position.set(x, 0, -10);
             spotLight.angle = Math.PI / 5;
@@ -197,7 +202,7 @@ class MarsRover {
         this.antennaDish.position.set(-0.5, 1.6, 0.6);
         this.mesh.add(this.antennaDish);
 
-        // 7. Rocker-Bogie Suspension & 6 Wheels (3 on Left, 3 on Right)
+        // 7. Rocker-Bogie Suspension & 6 Wheels
         const wheelRadius = 0.35;
         const wheelThickness = 0.28;
         const wheelPositions = [
@@ -213,7 +218,6 @@ class MarsRover {
             const pivotGroup = new THREE.Group();
             pivotGroup.position.set(pos.x, pos.y, pos.z);
 
-            // Wheel Mesh
             const wGeo = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 16);
             wGeo.rotateZ(Math.PI / 2);
             
@@ -222,7 +226,6 @@ class MarsRover {
             tireMesh.castShadow = true;
             tireGroup.add(tireMesh);
 
-            // Metallic Rim cap
             const capGeo = new THREE.CylinderGeometry(wheelRadius * 0.5, wheelRadius * 0.5, wheelThickness + 0.02, 8);
             capGeo.rotateZ(Math.PI / 2);
             const capMesh = new THREE.Mesh(capGeo, metalBodyMat);
@@ -250,11 +253,11 @@ class MarsRover {
     }
 
     update(deltaTime, inputs, terrainHeightFunc) {
-        // Compute acceleration derivative for squat/nosedive simulation
+        // Calculate acceleration derivative
         this.accelerationVal = (this.speed - this.lastSpeed) / Math.max(0.001, deltaTime);
         this.lastSpeed = this.speed;
 
-        // Handle Solar charging mode wing unfolding animation
+        // Solar panels unfold animation
         const targetAngle = this.isChargingMode ? -Math.PI / 3 : 0;
         this.leftSolarPivot.rotation.z += (targetAngle - this.leftSolarPivot.rotation.z) * 0.1;
         this.rightSolarPivot.rotation.z += (-targetAngle - this.rightSolarPivot.rotation.z) * 0.1;
@@ -283,28 +286,50 @@ class MarsRover {
                 this.speed += (-this.speed) * (this.friction * 2.8) * deltaTime;
             }
 
-            // Steering
+            // Steering & Sand Skid/Drift Mechanics
             const steerDir = (this.speed < 0) ? -1 : 1;
+            const speedRatio = Math.abs(this.speed) / this.maxSpeed;
+
             if (inputs.left) {
-                this.rotation += this.turnSpeed * steerDir * deltaTime * (Math.abs(this.speed) / this.maxSpeed + 0.4);
-                this.steeringAngle = Math.min(0.55, this.steeringAngle + deltaTime * 2.5);
+                this.rotation += this.turnSpeed * steerDir * deltaTime * (speedRatio * 0.7 + 0.45);
+                this.steeringAngle = Math.min(0.58, this.steeringAngle + deltaTime * 2.8);
             } else if (inputs.right) {
-                this.rotation -= this.turnSpeed * steerDir * deltaTime * (Math.abs(this.speed) / this.maxSpeed + 0.4);
-                this.steeringAngle = Math.max(-0.55, this.steeringAngle - deltaTime * 2.5);
+                this.rotation -= this.turnSpeed * steerDir * deltaTime * (speedRatio * 0.7 + 0.45);
+                this.steeringAngle = Math.max(-0.58, this.steeringAngle - deltaTime * 2.8);
             } else {
-                this.steeringAngle += (-this.steeringAngle) * 5.0 * deltaTime;
+                // Auto-return steering damping
+                this.steeringAngle += (-this.steeringAngle) * 5.5 * deltaTime;
+            }
+
+            // Trigger Sand Drift when turning at high speed
+            if (speedRatio > 0.45 && Math.abs(this.steeringAngle) > 0.35) {
+                this.isDrifting = true;
+                this.driftFactor = Math.min(1.0, this.driftFactor + deltaTime * 3.0);
+            } else {
+                this.isDrifting = false;
+                this.driftFactor = Math.max(0, this.driftFactor - deltaTime * 4.0);
             }
         }
 
-        // Translate Rover Position
+        // Translate Rover Position with Drift Lateral Momentum
         const speedMS = (this.speed / 3.6);
-        this.position.x -= Math.sin(this.rotation) * speedMS * deltaTime;
-        this.position.z -= Math.cos(this.rotation) * speedMS * deltaTime;
+        const forwardX = -Math.sin(this.rotation);
+        const forwardZ = -Math.cos(this.rotation);
 
-        // Ground Height & Dynamic Suspension Springs
+        // Slide direction vector perpendicular to forward direction during drift
+        const sideX = Math.cos(this.rotation);
+        const sideZ = -Math.sin(this.rotation);
+        const driftSign = Math.sign(this.steeringAngle);
+
+        const moveX = (forwardX * speedMS) + (sideX * driftSign * speedMS * 0.35 * this.driftFactor);
+        const moveZ = (forwardZ * speedMS) + (sideZ * driftSign * speedMS * 0.35 * this.driftFactor);
+
+        this.position.x += moveX * deltaTime;
+        this.position.z += moveZ * deltaTime;
+
+        // Ground Height & 4-Corner Wheel Suspension Springs
         const y = terrainHeightFunc(this.position.x, this.position.z);
         
-        // Terrain slope pitch & roll sampling
         const frontY = terrainHeightFunc(this.position.x - Math.sin(this.rotation) * 1.4, this.position.z - Math.cos(this.rotation) * 1.4);
         const backY  = terrainHeightFunc(this.position.x + Math.sin(this.rotation) * 1.4, this.position.z + Math.cos(this.rotation) * 1.4);
         const sideY  = terrainHeightFunc(this.position.x + Math.cos(this.rotation) * 1.2, this.position.z - Math.sin(this.rotation) * 1.2);
@@ -312,35 +337,35 @@ class MarsRover {
         const targetPitch = (frontY - backY) * 0.35;
         const targetRoll  = (sideY - y) * 0.35;
 
-        // Add Juice: Nosedive on brake (-accel), Squat on accel (+accel), Body roll into turns
-        const nosedivePitch = -this.accelerationVal * 0.008;
-        const steerBodyRoll = -this.steeringAngle * (this.speed / this.maxSpeed) * 0.25;
+        // Nosedive on brake, Squat on acceleration, Body roll on steering & drift
+        const nosedivePitch = -this.accelerationVal * 0.009;
+        const steerBodyRoll = -this.steeringAngle * speedRatio * 0.3 + (driftSign * this.driftFactor * 0.15);
 
-        // Smooth suspension spring interpolation
-        this.suspensionPitch += (targetPitch + nosedivePitch - this.suspensionPitch) * 0.15;
-        this.suspensionRoll  += (targetRoll + steerBodyRoll - this.suspensionRoll) * 0.15;
+        // Smooth spring dampening
+        this.suspensionPitch += (targetPitch + nosedivePitch - this.suspensionPitch) * 0.18;
+        this.suspensionRoll  += (targetRoll + steerBodyRoll - this.suspensionRoll) * 0.18;
 
-        // Rough terrain bounce
-        if (Math.abs(this.speed) > 4.0) {
-            this.bounceVelocity += (Math.random() - 0.5) * 0.08 * (Math.abs(this.speed) / this.maxSpeed);
+        // Rough terrain bump bounce
+        if (Math.abs(this.speed) > 3.5) {
+            this.bounceVelocity += (Math.random() - 0.5) * 0.09 * speedRatio;
         }
         this.bounceOffset += this.bounceVelocity;
-        this.bounceVelocity += (-this.bounceOffset) * 0.2; // spring return
-        this.bounceVelocity *= 0.85; // damping
+        this.bounceVelocity += (-this.bounceOffset) * 0.22;
+        this.bounceVelocity *= 0.82;
 
-        this.position.y = y + Math.max(-0.2, Math.min(0.2, this.bounceOffset));
+        this.position.y = y + Math.max(-0.25, Math.min(0.25, this.bounceOffset));
         this.pitch = this.suspensionPitch;
         this.roll  = this.suspensionRoll;
 
-        // Apply transformations to Three.js Mesh
+        // Apply transformations to Mesh
         this.mesh.position.copy(this.position);
         this.mesh.rotation.y = this.rotation;
         this.mesh.rotation.x = this.pitch;
         this.mesh.rotation.z = this.roll;
 
-        // Rotate Wheels and Ackermann Steer Wheel Pivots
+        // Rotate Wheels and Ackermann Steer Pivots
         this.steeredWheelGroups.forEach(sw => {
-            const angle = sw.isRear ? -this.steeringAngle * 0.7 : this.steeringAngle;
+            const angle = sw.isRear ? -this.steeringAngle * 0.65 : this.steeringAngle;
             sw.group.rotation.y = angle;
         });
 
@@ -350,12 +375,12 @@ class MarsRover {
             w.rotation.x += wheelRollDelta;
         });
 
-        // Slow tracking rotation for High-Gain Antenna Dish
+        // High-Gain Antenna tracking rotation
         if (this.antennaDish) {
             this.antennaDish.rotation.y += deltaTime * 0.2;
         }
 
-        // Animate Laser Beam and Camera Head tracking when scanning
+        // Animate Laser Beam and Camera Head tracking
         if (this.isScanning) {
             this.laserMesh.visible = true;
             this.laserMesh.material.opacity = 0.7 + Math.sin(Date.now() * 0.03) * 0.25;

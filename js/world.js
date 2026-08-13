@@ -1,13 +1,16 @@
 /**
- * Mars World Generator: Procedural Terrain, Sky, Lighting, Weather, Wheel Tracks, and Sample Waypoints
- * Enhanced with Procedural Normal Maps, Soft Particles, Hologram Scanners & Atmospheric Sky Dome
+ * Mars World Generator: Infinite Procedural Terrain, Dynamic Sky, Volumetric Weather & Particle Systems
+ * Implements Chunkless Grid-Shifting Infinite Terrain, Deterministic Object Pooling, and 2D Perlin-Noise Mars Dunes
  */
 class MarsWorld {
     constructor(scene) {
         this.scene = scene;
         this.terrainMesh = null;
-        this.terrainSize = 400; // 400m x 400m map size
-        this.segments = 140;
+        this.terrainSize = 380; // 380m x 380m viewport
+        this.segments = 130;
+        this.gridCenterX = 0;
+        this.gridCenterZ = 0;
+
         this.dustParticles = null;
         this.sandstormActive = false;
         this.samples = [];
@@ -15,30 +18,32 @@ class MarsWorld {
         // Visual enhancement systems
         this.wheelDustSystem = null;
         this.wheelDustPositions = [];
-        this.wheelTracksMesh = null;
-        this.trackPoints = [];
+        this.sparkParticles = null;
+        this.atmosphereDome = null;
         this.dayTime = 0.25; // 0 to 1 cycle
         this.sunLight = null;
         this.ambientLight = null;
-        this.sparkParticles = null;
-        this.atmosphereDome = null;
 
-        // Particle textures
+        // Rock pooling for infinite procedural scattering
+        this.rockPool = [];
+        this.maxRocks = 180;
+
+        // Particle textures & procedural normal maps
         this.softParticleTexture = this.createSoftParticleTexture();
         this.proceduralTextures = this.createProceduralTerrainTextures();
 
         this.initLightingAndFog();
         this.initSkyAndMoons();
         this.initAtmosphereDome();
-        this.generateTerrain();
-        this.scatterBouldersAndCraters();
+        this.initInfiniteTerrain();
+        this.initRockPool();
         this.initDustParticles();
         this.initWheelDustSystem();
         this.initSparkParticleSystem();
         this.spawnScientificSamples();
     }
 
-    // Canvas 2D generated soft particle texture for volumetric smoke/dust
+    // Canvas 2D soft particle texture for volumetric smoke/dust
     createSoftParticleTexture() {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
@@ -47,8 +52,8 @@ class MarsWorld {
         
         const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
         grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        grad.addColorStop(0.3, 'rgba(255, 200, 160, 0.7)');
-        grad.addColorStop(0.7, 'rgba(200, 100, 50, 0.2)');
+        grad.addColorStop(0.25, 'rgba(255, 190, 140, 0.75)');
+        grad.addColorStop(0.65, 'rgba(200, 90, 40, 0.2)');
         grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
         ctx.fillStyle = grad;
@@ -59,7 +64,7 @@ class MarsWorld {
         return tex;
     }
 
-    // Canvas 2D generated procedural Normal Map and Roughness Map for Mars Soil
+    // Canvas 2D procedural Normal Map and Roughness Map for Mars Soil
     createProceduralTerrainTextures() {
         const size = 512;
         const canvasN = document.createElement('canvas');
@@ -80,23 +85,15 @@ class MarsWorld {
         for (let y = 0; y < size; y++) {
             for (let x = 0; x < size; x++) {
                 const index = (y * size + x) * 4;
-                
-                // Procedural micro-dune perlin noise
                 const nx = Math.sin(x * 0.15) * Math.cos(y * 0.08) * 40;
                 const ny = Math.cos(x * 0.08) * Math.sin(y * 0.15) * 40;
                 
-                // Normal RGB calculation
-                const r = Math.min(255, Math.max(0, 128 + nx));
-                const g = Math.min(255, Math.max(0, 128 + ny));
-                const b = 255;
-
-                dataN[index]     = r;
-                dataN[index + 1] = g;
-                dataN[index + 2] = b;
+                dataN[index]     = Math.min(255, Math.max(0, 128 + nx));
+                dataN[index + 1] = Math.min(255, Math.max(0, 128 + ny));
+                dataN[index + 2] = 255;
                 dataN[index + 3] = 255;
 
-                // Roughness variation
-                const rough = 180 + Math.sin(x * 0.05 + y * 0.05) * 50;
+                const rough = 170 + Math.sin(x * 0.06 + y * 0.06) * 55;
                 dataR[index]     = rough;
                 dataR[index + 1] = rough;
                 dataR[index + 2] = rough;
@@ -110,48 +107,61 @@ class MarsWorld {
         const normalTex = new THREE.CanvasTexture(canvasN);
         normalTex.wrapS = THREE.RepeatWrapping;
         normalTex.wrapT = THREE.RepeatWrapping;
-        normalTex.repeat.set(16, 16);
+        normalTex.repeat.set(18, 18);
 
         const roughTex = new THREE.CanvasTexture(canvasR);
         roughTex.wrapS = THREE.RepeatWrapping;
         roughTex.wrapT = THREE.RepeatWrapping;
-        roughTex.repeat.set(16, 16);
+        roughTex.repeat.set(18, 18);
 
         return { normalMap: normalTex, roughnessMap: roughTex };
     }
 
-    // Procedural height function for Mars craters and rolling dunes
+    /**
+     * Deterministic Infinite Mathematical Height Function getTerrainHeight(x, z)
+     * Valid for any (x, z) from -infinity to +infinity!
+     */
     getTerrainHeight(x, z) {
-        const d = Math.sqrt(x * x + z * z);
-        let h = Math.sin(x * 0.02) * Math.cos(z * 0.02) * 3.5;
-        h += Math.sin(x * 0.06 + 1.2) * Math.sin(z * 0.06) * 1.2;
-        h += Math.cos(x * 0.12) * Math.sin(z * 0.12) * 0.5;
+        // Multi-octave rolling dunes
+        let h = Math.sin(x * 0.015) * Math.cos(z * 0.015) * 5.5;
+        h += Math.sin(x * 0.038 + 1.4) * Math.sin(z * 0.038) * 2.2;
+        h += Math.cos(x * 0.085) * Math.sin(z * 0.085) * 0.7;
 
-        // Add a central crater near spawn (shallow flat dish)
-        if (d < 40) {
-            h -= (1 - (d / 40)) * 2.5;
-        }
+        // Micro ripples
+        h += Math.sin(x * 0.2) * Math.cos(z * 0.2) * 0.12;
 
-        // Add distant mountainous boundary ring
-        if (d > 140) {
-            const edge = (d - 140) * 0.15;
-            h += edge * edge;
+        // Periodic large crater dishes spaced every ~250m
+        const craterGridSize = 240;
+        const cx = Math.floor((x + craterGridSize / 2) / craterGridSize) * craterGridSize;
+        const cz = Math.floor((z + craterGridSize / 2) / craterGridSize) * craterGridSize;
+        const cDist = Math.hypot(x - cx, z - cz);
+
+        if (cDist < 35) {
+            const craterDepth = (1 - (cDist / 35));
+            h -= craterDepth * craterDepth * 4.2; // Dish cavity
+            if (cDist > 25) {
+                h += (1 - (cDist - 25) / 10) * 1.2; // Crater rim lip
+            }
         }
 
         return h;
     }
 
+    // Pseudo-random deterministic spatial hash for infinite rock placement
+    spatialHash(cellX, cellZ) {
+        let n = cellX * 73856093 ^ cellZ * 19349663;
+        n = (n << 13) ^ n;
+        return ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 0x7fffffff;
+    }
+
     initLightingAndFog() {
-        // Mars reddish fog & atmosphere
         const fogColor = new THREE.Color(0xd95738);
-        this.scene.fog = new THREE.FogExp2(fogColor, 0.007);
+        this.scene.fog = new THREE.FogExp2(fogColor, 0.006);
         this.scene.background = fogColor;
 
-        // Ambient Sun & Sky Light
         this.ambientLight = new THREE.AmbientLight(0xffaa88, 0.75);
         this.scene.add(this.ambientLight);
 
-        // Directional Sun Light with shadows
         this.sunLight = new THREE.DirectionalLight(0xffddaa, 1.6);
         this.sunLight.position.set(100, 70, -100);
         this.sunLight.castShadow = true;
@@ -169,12 +179,7 @@ class MarsWorld {
     }
 
     initSkyAndMoons() {
-        const moonMat = new THREE.MeshStandardMaterial({ 
-            color: 0xe2e8f0,
-            roughness: 0.8,
-            metalness: 0.2 
-        });
-        
+        const moonMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8, metalness: 0.2 });
         const phobos = new THREE.Mesh(new THREE.DodecahedronGeometry(2.5, 1), moonMat);
         phobos.position.set(-120, 160, -200);
         this.scene.add(phobos);
@@ -185,51 +190,19 @@ class MarsWorld {
     }
 
     initAtmosphereDome() {
-        // Atmospheric Sky Dome with radial horizon Haze
         const domeGeo = new THREE.SphereGeometry(360, 32, 16);
-        const domeMat = new THREE.MeshBasicMaterial({
-            color: 0xd95738,
-            side: THREE.BackSide,
-            transparent: true,
-            opacity: 0.85
-        });
+        const domeMat = new THREE.MeshBasicMaterial({ color: 0xd95738, side: THREE.BackSide, transparent: true, opacity: 0.85 });
         this.atmosphereDome = new THREE.Mesh(domeGeo, domeMat);
         this.scene.add(this.atmosphereDome);
     }
 
-    generateTerrain() {
+    initInfiniteTerrain() {
         const geo = new THREE.PlaneGeometry(this.terrainSize, this.terrainSize, this.segments, this.segments);
         geo.rotateX(-Math.PI / 2);
 
         const posAttr = geo.attributes.position;
-        const colors = [];
-
-        for (let i = 0; i < posAttr.count; i++) {
-            const x = posAttr.getX(i);
-            const z = posAttr.getZ(i);
-            const y = this.getTerrainHeight(x, z);
-            posAttr.setY(i, y);
-
-            // Add fine surface micro-roughness
-            const microNoise = Math.sin(x * 1.5) * Math.cos(z * 1.5) * 0.08;
-            posAttr.setY(i, y + microNoise);
-
-            // Red-orange Mars soil gradient based on elevation & slope
-            const c = new THREE.Color();
-            const noiseFactor = (Math.sin(x * 0.1) + Math.cos(z * 0.1)) * 0.05;
-
-            if (y > 3) {
-                c.setHSL(0.04, 0.65, 0.32 + noiseFactor); // High dark rocky ground
-            } else if (y < -1) {
-                c.setHSL(0.06, 0.80, 0.45 + noiseFactor); // Basin reddish dust
-            } else {
-                c.setHSL(0.05, 0.72, 0.38 + noiseFactor); // Standard rust soil
-            }
-            colors.push(c.r, c.g, c.b);
-        }
-
-        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        geo.computeVertexNormals();
+        const colors = new Float32Array(posAttr.count * 3);
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const terrainMat = new THREE.MeshStandardMaterial({
             vertexColors: true,
@@ -237,48 +210,129 @@ class MarsWorld {
             metalness: 0.12,
             flatShading: false,
             normalMap: this.proceduralTextures.normalMap,
-            normalScale: new THREE.Vector2(0.6, 0.6),
+            normalScale: new THREE.Vector2(0.65, 0.65),
             roughnessMap: this.proceduralTextures.roughnessMap
         });
 
         this.terrainMesh = new THREE.Mesh(geo, terrainMat);
         this.terrainMesh.receiveShadow = true;
         this.scene.add(this.terrainMesh);
+
+        this.rebuildTerrainVertices(0, 0);
     }
 
-    scatterBouldersAndCraters() {
+    rebuildTerrainVertices(centerX, centerZ) {
+        if (!this.terrainMesh) return;
+        const geo = this.terrainMesh.geometry;
+        const posAttr = geo.attributes.position;
+        const colAttr = geo.attributes.color;
+        const colors = colAttr.array;
+
+        this.terrainMesh.position.set(centerX, 0, centerZ);
+
+        const halfSize = this.terrainSize / 2;
+        const step = this.terrainSize / this.segments;
+
+        for (let i = 0; i < posAttr.count; i++) {
+            const localX = (i % (this.segments + 1)) * step - halfSize;
+            const localZ = Math.floor(i / (this.segments + 1)) * step - halfSize;
+
+            const worldX = centerX + localX;
+            const worldZ = centerZ + localZ;
+            const worldY = this.getTerrainHeight(worldX, worldZ);
+
+            posAttr.setY(i, worldY);
+
+            // Soil color gradient based on elevation & noise
+            const noiseFactor = (Math.sin(worldX * 0.08) + Math.cos(worldZ * 0.08)) * 0.05;
+            const c = new THREE.Color();
+            if (worldY > 3) {
+                c.setHSL(0.04, 0.65, 0.32 + noiseFactor);
+            } else if (worldY < -1) {
+                c.setHSL(0.06, 0.80, 0.45 + noiseFactor);
+            } else {
+                c.setHSL(0.05, 0.72, 0.38 + noiseFactor);
+            }
+
+            const cIdx = i * 3;
+            colors[cIdx]     = c.r;
+            colors[cIdx + 1] = c.g;
+            colors[cIdx + 2] = c.b;
+        }
+
+        posAttr.needsUpdate = true;
+        colAttr.needsUpdate = true;
+        geo.computeVertexNormals();
+    }
+
+    updateInfiniteTerrain(roverPos) {
+        const snapStep = 8;
+        const targetGridX = Math.floor(roverPos.x / snapStep) * snapStep;
+        const targetGridZ = Math.floor(roverPos.z / snapStep) * snapStep;
+
+        if (targetGridX !== this.gridCenterX || targetGridZ !== this.gridCenterZ) {
+            this.gridCenterX = targetGridX;
+            this.gridCenterZ = targetGridZ;
+            this.rebuildTerrainVertices(this.gridCenterX, this.gridCenterZ);
+        }
+
+        // Keep Atmosphere Dome centered on Rover
+        if (this.atmosphereDome) {
+            this.atmosphereDome.position.set(roverPos.x, 0, roverPos.z);
+        }
+    }
+
+    initRockPool() {
         const rockGeo = new THREE.DodecahedronGeometry(1, 1);
-        const rockMat = new THREE.MeshStandardMaterial({
-            color: 0x8b3a2b,
-            roughness: 0.88,
-            metalness: 0.15
-        });
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b3a2b, roughness: 0.88, metalness: 0.15 });
+        const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 0.6, roughness: 0.2, metalness: 0.8 });
 
-        const crystalMat = new THREE.MeshStandardMaterial({
-            color: 0x00e5ff,
-            emissive: 0x00e5ff,
-            emissiveIntensity: 0.6,
-            roughness: 0.2,
-            metalness: 0.8
-        });
-
-        const numBoulders = 220;
-        for (let i = 0; i < numBoulders; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 14 + Math.random() * 160;
-            const x = Math.sin(angle) * dist;
-            const z = Math.cos(angle) * dist;
-            const y = this.getTerrainHeight(x, z);
-
-            const isCrystalMeteor = (i % 15 === 0);
-            const rock = new THREE.Mesh(rockGeo, isCrystalMeteor ? crystalMat : rockMat);
-            const scale = 0.5 + Math.random() * 2.5;
-            rock.scale.set(scale, scale * (0.6 + Math.random() * 0.6), scale);
-            rock.position.set(x, y + scale * 0.4, z);
-            rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+        for (let i = 0; i < this.maxRocks; i++) {
+            const isCrystal = (i % 14 === 0);
+            const rock = new THREE.Mesh(rockGeo, isCrystal ? crystalMat : rockMat);
             rock.castShadow = true;
             rock.receiveShadow = true;
+            rock.visible = false;
             this.scene.add(rock);
+            this.rockPool.push(rock);
+        }
+    }
+
+    updateInfiniteRocks(roverPos) {
+        const cellSize = 18;
+        const radiusCells = 8; // ~144m view radius
+        const rCellX = Math.floor(roverPos.x / cellSize);
+        const rCellZ = Math.floor(roverPos.z / cellSize);
+
+        let rockIdx = 0;
+
+        for (let cx = rCellX - radiusCells; cx <= rCellX + radiusCells; cx++) {
+            for (let cz = rCellZ - radiusCells; cz <= rCellZ + radiusCells; cz++) {
+                const val = this.spatialHash(cx, cz);
+                if (val > 0.68) { // 32% chance of rock in this cell
+                    if (rockIdx >= this.maxRocks) break;
+
+                    const rock = this.rockPool[rockIdx];
+                    const offsetX = (val * 17) % cellSize;
+                    const offsetZ = ((val * 31) % cellSize);
+                    const worldX = cx * cellSize + offsetX;
+                    const worldZ = cz * cellSize + offsetZ;
+                    const worldY = this.getTerrainHeight(worldX, worldZ);
+
+                    const scale = 0.6 + (val * 10) % 2.2;
+                    rock.scale.set(scale, scale * (0.6 + (val * 5) % 0.6), scale);
+                    rock.position.set(worldX, worldY + scale * 0.35, worldZ);
+                    rock.rotation.set((val * 7) % Math.PI, (val * 13) % Math.PI, 0);
+                    rock.visible = true;
+
+                    rockIdx++;
+                }
+            }
+        }
+
+        // Hide remaining unused rocks in pool
+        for (let i = rockIdx; i < this.maxRocks; i++) {
+            this.rockPool[i].visible = false;
         }
     }
 
@@ -318,7 +372,7 @@ class MarsWorld {
 
         const pMat = new THREE.PointsMaterial({
             color: 0xe65c00,
-            size: 2.2,
+            size: 2.4,
             map: this.softParticleTexture,
             transparent: true,
             opacity: 0.65,
@@ -355,19 +409,20 @@ class MarsWorld {
         this.scene.add(this.sparkParticles);
     }
 
-    triggerWheelDust(roverPos, speed) {
+    triggerWheelDust(roverPos, speed, isDrifting = false) {
         if (Math.abs(speed) < 0.8) return;
 
         const freeIndex = this.wheelDustPositions.findIndex(p => p.life <= 0);
         if (freeIndex !== -1) {
+            const spread = isDrifting ? 2.8 : 1.6;
             this.wheelDustPositions[freeIndex] = {
-                x: roverPos.x + (Math.random() - 0.5) * 1.6,
+                x: roverPos.x + (Math.random() - 0.5) * spread,
                 y: roverPos.y + 0.2,
-                z: roverPos.z + (Math.random() - 0.5) * 1.6,
-                vx: (Math.random() - 0.5) * 1.2,
-                vy: 0.8 + Math.random() * 1.0,
-                vz: (Math.random() - 0.5) * 1.2,
-                life: 1.0
+                z: roverPos.z + (Math.random() - 0.5) * spread,
+                vx: (Math.random() - 0.5) * (isDrifting ? 2.5 : 1.2),
+                vy: 0.8 + Math.random() * (isDrifting ? 1.8 : 1.0),
+                vz: (Math.random() - 0.5) * (isDrifting ? 2.5 : 1.2),
+                life: isDrifting ? 1.4 : 1.0
             };
         }
     }
@@ -398,7 +453,7 @@ class MarsWorld {
             { id: 2, name: "耶泽罗三角洲绿泥石", type: "古湖泊沉积", color: 0x00e5ff, desc: "形成于 37 亿年前古河流结晶的水合硅酸盐黏土，极具古生命沉积印记。", pos: { x: -65, z: 50 } },
             { id: 3, name: "深层水冰地下核心", type: "冰晶遗迹", color: 0x60a5fa, desc: "冻结于地表以下 1.5 米处的纯净高浓度水冰晶体，含微量溶解气泡。", pos: { x: 70, z: 85 } },
             { id: 4, name: "强磁赤铁矿异常", type: "强磁矿物", color: 0xff3b30, desc: "呈高度各向异性磁化的赤铁矿结晶，记录了古火星磁场的倒转事件。", pos: { x: -90, z: -80 } },
-            { id: 5, name: "赤铁矿蓝莓结核", type: "球状沉积", color: 0xa855f7, desc: "著名的“蓝莓”球粒状赤铁矿，由地下地下水渗透沉淀缓慢生长而成。", pos: { x: 110, z: -60 } },
+            { id: 5, name: "赤铁矿蓝莓结核", type: "球状沉积", color: 0xa855f7, desc: "著名的“蓝莓”球粒状赤铁矿，由地下水渗透沉淀缓慢生长而成。", pos: { x: 110, z: -60 } },
             { id: 6, name: "陨石撞击熔融玻璃", type: "高压熔岩", color: 0xf59e0b, desc: "极高温度陨石撞击产生的淬火二氧化硅玻璃，封装有撞击瞬间的大气微粒。", pos: { x: -120, z: 30 } },
             { id: 7, name: "古叠层石生物基质", type: "有机遗迹", color: 0xfacc15, desc: "具有层状结构的碳酸盐微沉淀物，与地球最古老蓝藻叠层石形态高度吻合！", pos: { x: 45, z: 120 } },
             { id: 8, name: "奇异火星晶体巨石", type: "未知异象", color: 0xec4899, desc: "发射未知微弱电磁脉冲的规则棱柱晶体，成分无法用传统矿物学完全解释。", pos: { x: -30, z: -130 } }
@@ -420,27 +475,16 @@ class MarsWorld {
             sampleMesh.position.set(def.pos.x, y + 1.3, def.pos.z);
             this.scene.add(sampleMesh);
 
-            // Vertical Beacon Light Pillar with dynamic glow
             const beaconGeo = new THREE.CylinderGeometry(0.12, 0.12, 18, 8);
             beaconGeo.translate(0, 9, 0);
-            const beaconMat = new THREE.MeshBasicMaterial({
-                color: def.color,
-                transparent: true,
-                opacity: 0.45
-            });
+            const beaconMat = new THREE.MeshBasicMaterial({ color: def.color, transparent: true, opacity: 0.45 });
             const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
             beaconMesh.position.set(def.pos.x, y, def.pos.z);
             this.scene.add(beaconMesh);
 
-            // Ground Target Scan Hologram Ring
             const ringGeo = new THREE.RingGeometry(1.2, 1.5, 32);
             ringGeo.rotateX(-Math.PI / 2);
-            const ringMat = new THREE.MeshBasicMaterial({
-                color: def.color,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.6
-            });
+            const ringMat = new THREE.MeshBasicMaterial({ color: def.color, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
             const hologramRing = new THREE.Mesh(ringGeo, ringMat);
             hologramRing.position.set(def.pos.x, y + 0.05, def.pos.z);
             this.scene.add(hologramRing);
@@ -458,13 +502,14 @@ class MarsWorld {
 
     setSandstorm(active) {
         this.sandstormActive = active;
-        const fogDensity = active ? 0.035 : 0.007;
+        const fogDensity = active ? 0.035 : 0.006;
         this.scene.fog.density = fogDensity;
         window.roverAudio.setSandstormWind(active);
     }
 
     updateDayNightCycle(deltaTime) {
-        this.dayTime = (this.dayTime + deltaTime * 0.005) % 1.0;
+        // 12-minute full Martian Day/Night Cycle
+        this.dayTime = (this.dayTime + deltaTime * (1 / 720)) % 1.0;
         const sunAngle = this.dayTime * Math.PI * 2;
 
         const sunX = Math.cos(sunAngle) * 120;
@@ -488,10 +533,15 @@ class MarsWorld {
         }
     }
 
-    update(deltaTime) {
+    update(deltaTime, roverPos) {
         this.updateDayNightCycle(deltaTime);
 
-        // Animate floating and spinning sample markers & hologram ring pulse
+        if (roverPos) {
+            this.updateInfiniteTerrain(roverPos);
+            this.updateInfiniteRocks(roverPos);
+        }
+
+        // Animate sample markers & hologram ring pulse
         this.samples.forEach(s => {
             if (!s.collected) {
                 s.mesh.rotation.y += deltaTime * 1.5;
@@ -521,8 +571,8 @@ class MarsWorld {
             posAttr.needsUpdate = true;
         }
 
-        // Drift ambient dust particles with Mars wind
-        if (this.dustParticles) {
+        // Drift ambient dust particles relative to Rover
+        if (this.dustParticles && roverPos) {
             const posAttr = this.dustParticles.geometry.attributes.position;
             const windSpeed = this.sandstormActive ? 35 : 8;
 
@@ -531,9 +581,10 @@ class MarsWorld {
                 let y = posAttr.getY(i) - (this.sandstormActive ? 2.8 : 0.5) * deltaTime;
                 let z = posAttr.getZ(i) + (windSpeed * 0.3) * deltaTime;
 
-                if (x > 160) x = -160;
+                // Keep particles inside bounding box around Rover
+                if (Math.abs(x - roverPos.x) > 160) x = roverPos.x - 160;
                 if (y < 0) y = 35;
-                if (z > 160) z = -160;
+                if (Math.abs(z - roverPos.z) > 160) z = roverPos.z - 160;
 
                 posAttr.setXYZ(i, x, y, z);
             }

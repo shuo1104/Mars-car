@@ -91,6 +91,11 @@ body, html {
     grid-template-rows: auto 1fr auto;
     padding: 18px 24px;
     gap: 16px;
+    transition: opacity 0.6s ease-in-out;
+}
+
+#hud.hud-driving {
+    opacity: 0.25;
 }
 
 .hud-panel {
